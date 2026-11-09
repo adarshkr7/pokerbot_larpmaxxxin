@@ -29,3 +29,13 @@ Logs go to `logs/` (gitignored). Debug output must go to stderr, never stdout.
 - Python 3.11, stdlib + numpy + scipy only; single `bot.py` or zip with `bot.py` at top level, ≤ 5 MB
 - 1 vCPU, 1 GB RAM, read-only FS, no network, no subprocesses
 - Time bank 30 s/leg (Stage 1, 200 hands), 75 s/leg (Stage 2, 500 hands); 5 s per reply
+
+## How we work
+
+- [DEVELOPMENT.md](DEVELOPMENT.md): the development flow, promotion
+  gate, daily sequence Wed 11 → Sun 15 Nov.
+- [agents/](agents/): the agentic loop with **Claude Code + Codex**: roles, worktrees, module interfaces,
+  workstream briefs W1–W7, review and coordinator prompts.
+- [strategies/](strategies/): the strategy catalogue (P0–P3) plus the Gemini and GPT-astra research digests.
+- [champion/](champion/): the current best bot (`BEST.json`), changed only by `scripts/promote.py`.
+  `dist/submission.zip` is always built from it. **Upload only that.**

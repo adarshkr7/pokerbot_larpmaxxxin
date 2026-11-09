@@ -19,6 +19,11 @@ Hold'em where each player gets **3 hole cards** and, after flop betting, both pl
 | Path | Purpose | Edit? |
 |---|---|---|
 | `bot/` | Our submission. `bot/bot.py` is the entry point. | Yes |
+| `champion/` | The current BEST bot (`champion/bot/`), its scores (`BEST.json`), promotion history and the gauntlet config. **Changed only by `scripts/promote.py`** | No (only via promote) |
+| `scripts/promote.py` | Promotion gate: gauntlet + head-to-head vs champion; on success swaps the champion and rebuilds `dist/submission.zip` | Yes |
+| `agents/` | Agentic loop (Claude Code + Codex): roles, worktrees, module interfaces, workstream briefs, review/coordinator prompts | Yes (interfaces via coordinator) |
+| `DEVELOPMENT.md` | The development flow: workstreams, agent protocol, promotion gate, plan review loop, daily sequence | Yes |
+| `strategies/` | Strategy catalogue: one file per area, with priorities (P0–P3), specs and status. The source of truth for strategy decisions; update the `Status:` lines as ideas are built | Yes |
 | `scripts/build.py` | Validates `bot/` (imports, stray stdout prints) and builds `dist/submission.zip` | Yes |
 | `tests/` | pytest: protocol tests (bot as subprocess) + a seeded engine match | Yes |
 | `requirements*.txt`, `pyproject.toml` | Pinned deps (runtime: numpy, scipy; dev: pytest) and pytest config | Yes |
@@ -136,6 +141,24 @@ Engine flags: `--stage 1|2`, `--hands N` (even), `--seed S`, `--verbose`, `--log
 4. `python scripts/build.py` passes (allowed imports only, no stray stdout prints, ≤ 5 MB).
 5. If the change is meant to improve strength, show results over many seeds against the
    previous version, not a single match.
+
+## Development flow (read DEVELOPMENT.md)
+
+Every agent follows this protocol for every task:
+1. **Restate the brief:** workstream, files you may touch, `strategies/` item IDs, measurable goal.
+2. **Solve**, using parallel subagents for independent sub-parts.
+3. **Check two ways** (e.g. evaluator vs engine `best_hand` + edge cases; Monte Carlo vs exact enumeration).
+4. **Measure:** `pytest`, `scripts/build.py --check`, `scripts/arena.py`, `scripts/promote.py --dry-run`.
+5. **Raise BEST only by winning:** `scripts/promote.py --note "..."`. Never edit `champion/` or
+   `dist/submission.zip` by hand. Only the champion's zip is ever uploaded.
+6. **Record:** update `Status:` lines in `strategies/`; commit on your workstream branch.
+
+We build with **Claude Code and Codex** in parallel (see `agents/README.md`): one agent per workstream in its own
+git worktree, coding against `agents/INTERFACES.md`, from a brief in `agents/briefs/`. Workstream agents only run
+`promote.py --dry-run`; the coordinator merges to `main` and runs the real promotion (refused off `main` or with
+uncommitted changes). Every diff is reviewed by the *other* model before merge (`agents/prompts/code_review.md`).
+Design-level changes go through the plan review loop (Claude plans → Codex reviews → fix or rebut each finding →
+simplicity pass → repeat until clean; `agents/prompts/plan_review.md`).
 
 ## Rivals (sparring bots)
 

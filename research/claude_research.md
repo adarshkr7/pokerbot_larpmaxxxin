@@ -66,6 +66,11 @@ No usable discard charts exist, so **we have to compute our own** (section 2).
 
 Discard study setup: 1,500 random flops, 300 MC samples per keep-pair, opponent modelled as random 2 cards.
 
+> **Update (after GPT-astra's review):** a random-2-card opponent is unrealistic, because opponents also keep 2 of 3.
+> Re-run with common random numbers and an opponent dealt 3 cards who keeps its best made pair on the flop:
+> toss-lowest is optimal on **56.6%** of flops and loses **6.10%** equity (vs 59.5% / 5.15% with random-2 under
+> the same method). The conclusion is unchanged and stronger. See `strategies/gpt_astra_report.md`.
+
 **What the numbers mean [analysis]:**
 - **The discard is a big decision.** Losing about 5.5% equity in every contested pot is huge. A correct
   equity-max discard is the cheapest large edge available, and many student bots will toss the lowest

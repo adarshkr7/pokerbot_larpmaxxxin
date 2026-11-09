@@ -27,3 +27,9 @@ rivals/*
 !rivals/rivals.json
 !rivals/README.md
 .venv-rivals/
+
+# Promotion scratch
+champion/.lock
+champion/bot.tmp/
+champion/bot.old/
+champion/BEST.json.tmp

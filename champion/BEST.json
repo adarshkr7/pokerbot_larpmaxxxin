@@ -1,0 +1,19 @@
+{
+  "version": "v0",
+  "date": "2026-11-09T21:54:16",
+  "commit": "9305a2c-dirty",
+  "note": "baseline: organiser starter strategy (check/call, toss lowest)",
+  "source": "D:\\CODE\\Game_Bots\\pokerbots_iiitb\\bot",
+  "gauntlet_hash": "948776067b6c",
+  "gauntlet": {
+    "points": 15.0,
+    "matches": 24,
+    "capped_per_hand": 0.18864583333333335,
+    "notices": 0,
+    "forfeits": 0,
+    "max_time_s": 0.0,
+    "failed": []
+  },
+  "h2h": null,
+  "previous": null
+}

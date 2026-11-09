@@ -30,7 +30,7 @@ RIVALS_PY = ROOT / ".venv-rivals" / "Scripts" / "python.exe"
 if not RIVALS_PY.exists():
     RIVALS_PY = ROOT / ".venv-rivals" / "bin" / "python"
 
-LINE = re.compile(r"^\s+([AB])\s+.*?net\s+([+-]?\d+)\s+time used\s+([\d.]+) s.*notices (\d+)")
+LINE = re.compile(r"^\s+([AB])\s+.*?net\s+([+-]?\d+)\s+time used\s+([\d.]+) s.*notices (\d+)", re.M)
 ERRS = re.compile(r"rival/adapter errors: (\d+)")
 
 
@@ -93,7 +93,7 @@ def summarise(opp, results):
     t_opp = max(r["B"]["time"] for r in rs)
     ff = f"{sum(r['forfeit_A'] for r in rs)}/{sum(r['forfeit_B'] for r in rs)}"
     errs = sum(r["opp_errors"] for r in rs)
-    return (f"{opp:<24} {w:>2}-{d}-{l:<2} {mean:>+8.3f} ±{se:>6.3f}  {notices:>7}  "
+    return (f"{opp:<24} {w:>2}-{d}-{l:<2} {mean:>+8.3f} +/-{se:>6.3f}  {notices:>7}  "
             f"{t_max:>7.2f}  {t_opp:>7.2f}  {ff:>5}  {errs:>6}")
 
 
@@ -125,7 +125,7 @@ def main():
             results[futs[f]].append(f.result())
             print(f"\r  {i}/{len(jobs)} matches done", end="", flush=True)
     print("\n")
-    print(f"{'opponent':<24} {'W-D-L':<6} {'chips/hand':>9} {'±SE':>7}  notices  ourTmax  oppTmax  "
+    print(f"{'opponent':<24} {'W-D-L':<6} {'chips/hand':>9} {'+/-SE':>9}  notices  ourTmax  oppTmax  "
           f"ff us/opp  opp_err")
     for o in opps:
         print(summarise(o, results[o]))
