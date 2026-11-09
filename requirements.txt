@@ -1,0 +1,4 @@
+# Runtime: the ONLY third-party packages the competition allows (Rulebook 5.2).
+# The judge's exact versions are unknown; stick to long-stable APIs.
+numpy==2.4.6
+scipy==1.17.1

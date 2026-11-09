@@ -1,0 +1,3 @@
+-r requirements.txt
+# Dev-only. Never import these from bot/.
+pytest==9.2.0

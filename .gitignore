@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Engine output
+logs/
+*_stderr.txt
+
+# Build artifacts (submission zips)
+dist/
+
+# Original downloads (kept locally, not versioned)
+.downloads/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Rival sparring bots: third-party code, local only (never committed, never shipped)
+rivals/*
+!rivals/mit_adapter.py
+!rivals/fetch_rivals.py
+!rivals/rivals.json
+!rivals/README.md
+.venv-rivals/
