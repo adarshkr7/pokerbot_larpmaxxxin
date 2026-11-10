@@ -1,6 +1,6 @@
 # W3: Discard
 
-**Agent:** Claude Code · **Branch:** `ws/W3` · **Day:** Wed (D1) → Fri (D2, D3)
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/W3` · **Day:** Wed (D1) → Fri (D2, D3)
 
 ## Goal
 Wed: an equity-max discard against **realistic opponents** (dealt 3 cards, discarding by `opp_discard_policy`),

@@ -1,6 +1,6 @@
 # W4: Preflop (tiers → offline table)
 
-**Agent:** Codex · **Branch:** `ws/W4` · **Day:** Wed (tiers) → Thu (table)
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/W4` · **Day:** Wed (tiers) → Thu (table)
 
 ## Goal
 Wed: a heuristic tier preflop (04/P1). Thu: an **offline-computed** equity table for all 1,755 canonical

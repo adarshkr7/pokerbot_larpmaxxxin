@@ -1,6 +1,6 @@
 # Wn: <title>
 
-**Agent:** Claude Code / Codex · **Branch:** `ws/Wn` · **Worktree:** `../pokerbots_wt/Wn`
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/Wn` · **Worktree:** `../pokerbots_wt/Wn`
 
 ## Goal
 <one sentence, measurable>

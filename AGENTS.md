@@ -153,12 +153,12 @@ Every agent follows this protocol for every task:
    `dist/submission.zip` by hand. Only the champion's zip is ever uploaded.
 6. **Record:** update `Status:` lines in `strategies/`; commit on your workstream branch.
 
-We build with **Claude Code and Codex** in parallel (see `agents/README.md`): one agent per workstream in its own
-git worktree, coding against `agents/INTERFACES.md`, from a brief in `agents/briefs/`. Workstream agents only run
-`promote.py --dry-run`; the coordinator merges to `main` and runs the real promotion (refused off `main` or with
-uncommitted changes). Every diff is reviewed by the *other* model before merge (`agents/prompts/code_review.md`).
-Design-level changes go through the plan review loop (Claude plans → Codex reviews → fix or rebut each finding →
-simplicity pass → repeat until clean; `agents/prompts/plan_review.md`).
+**Every feature follows the plan → review → implement loop** (`agents/README.md`):
+Claude writes the plan in `agents/plans/Fnn_*.md`; Codex reviews it with `agents/prompts/plan_review.md` and returns a
+bug list; Claude answers each bug (*fixed* / *rejected because …*) in the plan's review log and resubmits; repeat
+until Codex reports **no bugs**; only then Claude implements it. **No code for a feature before its plan is approved.**
+Real promotions happen only from committed code on `main` (`promote.py` refuses otherwise).
+Commits carry no AI co-author or attribution trailers.
 
 ## Rivals (sparring bots)
 

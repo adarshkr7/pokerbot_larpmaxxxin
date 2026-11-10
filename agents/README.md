@@ -1,95 +1,63 @@
-# Agentic loop: Claude Code + Codex
+# Agentic loop: Claude plans and implements, Codex reviews
 
-How we build the bot from **Wed 11 Nov**: a fleet of AI agents, orchestrators, one protocol file, a fast
-scorer, and a BEST record that only goes up. See [../DEVELOPMENT.md](../DEVELOPMENT.md) for the full flow
-and daily sequence.
-
-## Roles
-
-| Role | Who | Where | Does |
-|---|---|---|---|
-| **Orchestrators** | the two of us | — | Give each agent its brief and our intuition for the approach; decide where effort goes; approve merges and uploads |
-| **Coordinator** | one Claude Code session | main checkout, branch `main` | Turns our instructions into briefs; watches the workstream agents; merges branches; runs **real** promotions; rebuilds the zip; tells us what to upload |
-| **Workstream agents** | Claude Code and Codex sessions, one per workstream | own git worktree, branch `ws/<id>` | Execute one brief with the agent protocol; promote with `--dry-run` only |
-| **Reviewer** | the *other* model | any | Reviews plans (plan review loop) and, before merge, the diff (code review) |
-
-Both tools read the same rules: **Codex reads `AGENTS.md` natively; Claude Code reads `CLAUDE.md`, which imports
-`AGENTS.md`.** One protocol file, two models.
-
-### Suggested roster (adjust freely)
-
-| Workstream | Agent | Why |
-|---|---|---|
-| W1 engine (protocol, legality, time) | Claude Code | Correctness-critical glue |
-| W2 evaluator + equity | Claude Code | Our prototype exists (`research/bench_discard.py`) |
-| W3 discard | Claude Code | Most strategy-dense; benefits from long context |
-| W4 preflop table (offline compute) | Codex | Self-contained script + data file |
-| W5 postflop betting | Codex | Clear spec in `strategies/05` |
-| W6 opponent model | Codex (Sat) | Clear spec in `strategies/06` |
-| W7 sparring bots + gauntlet | Codex | Small independent bots |
-
-Run each agent in its own terminal pane (e.g. Windows Terminal split panes, or a terminal multiplexer under WSL),
-so we can watch every agent live and type into any of them. Keep the coordinator pane in the main checkout.
-
-## Worktrees (one per workstream)
-
-```bash
-# coordinator, from the main checkout:
-git worktree add ../pokerbots_wt/W3 -b ws/W3 main      # create
-git worktree list                                      # see all
-git worktree remove ../pokerbots_wt/W3                 # after merge
-```
-
-Agents use the main checkout's venv by absolute path, e.g.
-`D:/CODE/Game_Bots/pokerbots_iiitb/.venv/Scripts/python.exe -m pytest`.
-`scripts/promote.py` always uses the **single** champion in the main checkout, even when run from a worktree.
-
-## The loop (per brief)
+How we build the bot from **Wed 11 Nov**. Every feature goes through one loop:
 
 ```mermaid
 flowchart LR
-    brief[Brief: agents/briefs/Wn.md] --> solve[Solve, with subagents]
-    solve --> verify[Check two ways]
-    verify --> measure[pytest + build --check + arena + promote --dry-run]
-    measure --> pass{Beats champion?}
-    pass -- no --> solve
-    pass -- yes --> review[Other model reviews the diff]
-    review --> merge[Coordinator merges to main]
-    merge --> promote[Coordinator: promote.py on main → BEST + zip]
+    plan[Claude writes the plan: agents/plans/Fnn.md] --> review[Codex reviews it: list of bugs]
+    review --> fix[Claude fixes or rebuts every bug, revises the plan]
+    fix --> clean{Codex: no bugs?}
+    clean -- no --> review
+    clean -- yes --> impl[Claude implements the approved plan]
+    impl --> verify[Tests + checks from the plan + promote.py --dry-run]
+    verify --> promote[promote.py on main → BEST + dist zip]
     promote --> upload[We upload dist/submission.zip]
-    promote --> rebase[Other worktrees rebase on main]
 ```
 
-1. **Brief.** Each workstream starts from `agents/briefs/Wn.md`: goal, files owned, interfaces, strategy IDs,
-   checks, done criteria. Paste it, plus any intuition we have, into the agent.
-2. **Solve** inside the files the brief owns. Code against [INTERFACES.md](INTERFACES.md); stub what isn't
-   merged yet.
-3. **Check two ways**, e.g. the evaluator vs the engine's `best_hand` *and* hand-written edge cases.
-4. **Measure:** `pytest`, `scripts/build.py --check`, `scripts/arena.py`, `scripts/promote.py --dry-run`
-   (from the worktree; the candidate defaults to that worktree's `bot/`).
-5. **Review.** The other model reviews the diff with [prompts/code_review.md](prompts/code_review.md). The author
-   fixes or rebuts each finding.
-6. **Merge and promote (coordinator only).** Rebase the branch onto `main`, merge, run
-   `scripts/promote.py --note "<Wn: what>"`. Only `promote.py` touches `champion/` and `dist/submission.zip`.
-7. **Upload.** After a promotion, one of us uploads `dist/submission.zip` to Unstop (at least daily).
+## Roles
 
-Infrastructure-only workstreams (W7 sparring bots, gauntlet changes) don't change the bot. They merge
-after review without a promotion, and the gauntlet change re-measures the champion automatically.
+| Role | Who | Does |
+|---|---|---|
+| **Orchestrators** | the two of us | Choose the next feature, add our intuition to the plan request, carry plans and reviews between Claude and Codex, approve merges and uploads |
+| **Planner + implementer** | Claude Code | Writes each feature plan, answers every review finding, implements only after approval, runs the checks and the promotion |
+| **Reviewer** | Codex | Reviews each plan revision against the rules, the engine and our interfaces, and returns a numbered **bug list** (or "no bugs") |
 
-## Plan review loop (design-level work)
+Codex reads `AGENTS.md` natively; Claude Code reads `CLAUDE.md`, which imports `AGENTS.md`. Both work on the
+same checkout, so Codex can read the plan file and the code it refers to directly.
 
-**Claude writes the plan → Codex reviews it → Claude fixes or rebuts every finding →
-simplicity pass → repeat** until Codex has no material findings, the simplicity pass cuts nothing, and Claude
-finds nothing to improve. Use [prompts/plan_review.md](prompts/plan_review.md). Apply it to:
-- the module interfaces ([INTERFACES.md](INTERFACES.md)), **before Wednesday**;
-- risky designs: time controller, range model and inverse-discard filter, opponent classifier.
+## Running one round
 
-Swap roles (Codex plans, Claude reviews) for workstreams where Codex is the author.
+1. **Claude:** writes or revises `agents/plans/Fnn_<name>.md` (from [plans/TEMPLATE.md](plans/TEMPLATE.md)), marks
+   it `Status: in review (round N)`, and pushes.
+2. **Whoever has Codex** (the teammate's machine) runs the review with the fixed settings
+   (`gpt-6-astra`, effort `medium`, read-only sandbox, prompt `agents/prompts/plan_review.md`):
+   ```bash
+   git pull
+   python scripts/review.py agents/plans/Fnn_<name>.md      # writes agents/plans/reviews/Fnn_<name>.roundN.md
+   git add agents/plans/reviews && git commit -m "Fnn review round N" && git push
+   ```
+3. **Claude** pulls and reads the bug list from `agents/plans/reviews/`. (Pasting the bug list in chat works too.)
+4. **Claude:** appends the round to the plan's **Review log**. Each bug gets *fixed (how)* or *rejected (why)*.
+   It revises the plan and bumps the round.
+5. Repeat 2–4 until Codex replies **"no bugs"**. Claude marks the plan `Status: approved (round N)`.
+6. **Claude implements** exactly the approved plan. If implementation reveals a design problem, Claude stops,
+   amends the plan, and sends that change back to Codex for review before continuing.
+7. **Claude verifies** with the plan's test section (each component checked two ways), `pytest`,
+   `scripts/build.py --check`, and `scripts/promote.py --dry-run`. If it beats the champion, Claude commits on
+   `main` and runs `scripts/promote.py --note "Fnn: ..."`. Then you upload `dist/submission.zip`.
 
-## Rules that keep a multi-agent build safe
-- **One owner per file.** Briefs list owned files; shared files (`bot/params.py`) have one section per workstream.
-- **Contracts before code.** Change [INTERFACES.md](INTERFACES.md) only through the coordinator, and announce it to all panes.
-- **Small merges, often.** Rebase every few hours; never let a branch drift a day from `main`.
+The status of every feature is tracked in [plans/README.md](plans/README.md).
+
+## Rules
+- **No code before approval.** A feature isn't implemented until its plan has a clean review.
+- **Every finding is answered.** "Rejected" needs a reason Codex can check (a rule, the engine source, a measurement).
+- **One feature per plan,** small enough to review in one sitting. Split anything bigger.
+- **Contracts in [INTERFACES.md](INTERFACES.md).** A plan that changes an interface must say so explicitly.
 - **No hand edits** to `champion/`, `dist/`, `starter_kit/`, `docs/`, `rivals/_src/`.
 - **Rulebook 10.1:** never copy code from public bot repos (including `rivals/_src/`) into `bot/`.
 - **The sandbox:** bot code uses only stdlib, numpy and scipy; no file writes, no network, no subprocesses.
+
+## Optional: parallel work
+To build two approved features at once, Claude may use a separate git worktree per feature
+(`git worktree add ../pokerbots_wt/Fnn -b feat/Fnn main`) and merge to `main` before promoting.
+`scripts/promote.py` always uses the single champion in the main checkout and refuses real promotions off `main`.

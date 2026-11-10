@@ -1,6 +1,6 @@
 # W5: Postflop betting
 
-**Agent:** Codex · **Branch:** `ws/W5` · **Day:** Wed (B1–B3) → Thu (B4–B6) → Fri (B7)
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/W5` · **Day:** Wed (B1–B3) → Thu (B4–B6) → Fri (B7)
 
 ## Goal
 Equity- and pot-odds-based flop/turn/river decisions with a small size menu, cap-aware raises and controlled

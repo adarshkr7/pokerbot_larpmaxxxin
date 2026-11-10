@@ -1,6 +1,6 @@
 # W1: Engine (protocol, legality, fallbacks, time controller)
 
-**Agent:** Claude Code · **Branch:** `ws/W1` · **Day:** Wed (first; others build on it)
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/W1` · **Day:** Wed (first; others build on it)
 
 ## Goal
 A bot skeleton that never forfeits and is never corrected by the engine: 0 notices and 0 forfeits over

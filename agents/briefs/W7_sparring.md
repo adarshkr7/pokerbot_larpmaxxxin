@@ -1,6 +1,6 @@
 # W7: Sparring bots and gauntlet
 
-**Agent:** Codex · **Branch:** `ws/W7` · **Day:** Wed (first batch) → ongoing
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/W7` · **Day:** Wed (first batch) → ongoing
 
 ## Goal
 Deterministic (seeded) sparring bots covering the expected field, added to `champion/gauntlet.json`, so

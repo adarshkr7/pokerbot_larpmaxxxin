@@ -1,6 +1,6 @@
 # W2: Cards, evaluator, equity
 
-**Agent:** Claude Code · **Branch:** `ws/W2` · **Day:** Wed (scalar) → Thu (numpy batches)
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/W2` · **Day:** Wed (scalar) → Thu (numpy batches)
 
 ## Goal
 Fast, verified hand evaluation and equity. Wed: the scalar `eval7` (≥ 250k evals/s locally) and Monte Carlo

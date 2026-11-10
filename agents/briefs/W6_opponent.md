@@ -1,6 +1,6 @@
 # W6: Opponent model and exploits
 
-**Agent:** Codex · **Branch:** `ws/W6` · **Day:** Sat (W1 ships the neutral stub on Wed)
+**Plans + implements:** Claude · **Reviews plans:** Codex · **Branch:** `ws/W6` · **Day:** Sat (W1 ships the neutral stub on Wed)
 
 ## Goal
 Regularised per-leg opponent statistics and a soft archetype blend that shifts W4/W5 parameters, giving

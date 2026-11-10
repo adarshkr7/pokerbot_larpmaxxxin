@@ -1,20 +1,40 @@
-# Prompt: plan review (paste into the reviewing model)
+# Prompt for Codex: plan review
 
-You are reviewing a design plan for our Discard Hold'em bot. Read `AGENTS.md`, `DEVELOPMENT.md`,
-`agents/INTERFACES.md` and the relevant `strategies/` files first. Then review the plan below.
+Paste this to Codex with the plan path, e.g. "Review `agents/plans/F01_engine_skeleton.md`".
 
-Look for, in order:
-1. **Bugs and wrong assumptions** about the rules (`docs/`, `starter_kit/engine.py` is the reference).
-2. **Failure modes that forfeit a match:** crashes, timeouts, illegal actions, file writes, unhandled
-   messages, numeric edge cases (all-in, min = max raise, zero weights).
-3. **Information leaks / impossible information:** e.g. a discard chosen using a future board; an opponent model
-   using our hidden cards.
-4. **Interface conflicts** with other workstreams.
-5. **Rule compliance:** stdlib/numpy/scipy only; no code from public bot repos; no cross-leg state.
-6. **Simplicity:** anything that can be cut without losing measurable strength.
+---
 
-Reply with a numbered list of findings. Each one: severity (blocker / major / minor), the exact plan text it
-refers to, why it is a problem, and a concrete fix. Say "no material findings" only if there are none.
+You are the **reviewer** in our plan → review → fix loop for a Discard Hold'em poker bot. Claude wrote the plan
+and will implement it only after you report no bugs. Your job is to find every bug in the **plan** before any code
+exists.
 
---- PLAN ---
-<paste plan here>
+Read first: `AGENTS.md`, `agents/INTERFACES.md`, the plan file, the `strategies/` files it cites, and as the
+ground truth for rules and messages, `docs/` and `starter_kit/engine.py`. Read existing code the plan touches.
+If this is a later round, read the plan's **Review log**, check that every earlier fix is real, and check that
+every rejection's reason holds.
+
+Hunt for, in order:
+1. **Rule and protocol errors:** wrong legality, amounts that aren't raise-to totals, a wrong street, card or
+   seat order, a discard edge case, message fields that can be missing.
+2. **Forfeit risks:** crashes, uncaught exceptions, timeouts, any path with zero or two replies to one request,
+   stdout pollution, file writes, slow start-up, unbounded loops, division by zero, empty ranges.
+3. **Impossible information:** using a future board, the opponent's hidden cards, or our unrevealed discard where
+   it isn't known; any state carried across legs.
+4. **Logic bugs:** off-by-one errors, wrong formulas, wrong units (chips vs bb, ms vs s), mutated shared state,
+   non-determinism where tests require determinism.
+5. **Gaps:** an edge case or acceptance criterion the plan doesn't cover; a test that wouldn't catch the bug it targets.
+6. **Interface conflicts** with `agents/INTERFACES.md` or other plans; rule compliance (stdlib/numpy/scipy only,
+   no code from public bot repos).
+7. **Unnecessary complexity** that can be cut without losing measurable strength.
+
+Reply in exactly this format:
+
+```
+ROUND <n> REVIEW of <plan file>
+B1 [blocker|major|minor] <section/quote> — <what is wrong> — <concrete fix>
+B2 ...
+VERDICT: <k> bugs | no bugs
+```
+
+Say `VERDICT: no bugs` only if you found nothing at blocker, major or minor level. Don't pad the list: style
+preferences are not bugs.
