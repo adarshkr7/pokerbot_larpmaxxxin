@@ -1,6 +1,6 @@
 # F02: Cards, evaluator, equity (scalar)
 
-**Status:** in review (round 5)
+**Status:** in review (round 6)
 **Workstream:** W2 · **Strategy items:** 02/E1, 02/E3, 02/E4 (`canon3` only) · **Owner:** Claude (implements) · **Reviewer:** Codex
 
 ## 1. Goal
@@ -140,37 +140,58 @@ lie in [0, 1]). The 32 samples after `n_j` are independent of the event `{N > n_
 
   `E[m_N] − μ = Σ_j 32/(n_j + 32) · E[1{N > n_j} · (μ − m_{n_j})]`
 
-and each term is at most `32/(n_j + 32) · E|m_{n_j} − μ| / 2 ≤ 32 / ((n_j + 32) · 4√n_j)`. This **per-checkpoint
-cap** holds for any values and any stopping rule. It is 0.0104 at 64 samples, 0.0064 at 96, 0.0033 at 160, 0.0013
-at 320, 0.00025 at 1,000, and it falls like `n^(−3/2)`. Summed over every checkpoint up to `MAX_SAMPLES`, it gives a
-distribution-free ceiling of 0.057. That ceiling only applies if an adversary could make the stop/continue decision
-uncertain at every checkpoint at once.
+and, since `E[μ − m_n] = 0`, each term satisfies `|term_j| ≤ 32/(n_j + 32) · E|m_{n_j} − μ| / 2
+≤ 16σ / ((n_j + 32)·√n_j)` (≤ 0.0104 at 64 samples with σ = 1/2). This **per-term cap** holds for any values and any
+stopping rule. It does **not** bound the total by itself, because several checkpoints can contribute at once (Codex
+round 5, B1: Bernoulli(0.5), costs 1 and 3, B = 20,000 gives bias −2.49e-5. No stop is possible before checkpoint
+~6,688, and around 26 checkpoints are uncertain; the cap at the first of them is only 1.4e-5).
+
+*Proven bound (support sum, telescoped).* A term vanishes whenever `P(N > n_j)` is 0 (the indicator is 0) or 1 (then
+it equals `E[μ − m_{n_j}] = 0`). Let `n_first` and `n_last` be the first and last checkpoints at which the
+stop/continue decision is uncertain. Then `|bias| ≤ Σ_{n_first ≤ n_j ≤ n_last} 16σ/((n_j + 32)√n_j)`. Each summand
+is at most `σ · (1/√n_j − 1/√(n_j + 32))`, which is equivalent to `√(n_j(n_j + 32)) ≤ n_j + 32`. So the sum
+telescopes:
+
+  `|bias| ≤ σ · (1/√n_first − 1/√(n_last + 32)) ≤ σ / √n_first`
+
+That is, the bias never exceeds the standard error of a fixed-count mean of `n_first` samples. It is proven for any
+values in [0, 1] and any stopping rule. Two corollaries:
+- Every call has `n_first ≥ MIN_SAMPLES`, so `|bias| ≤ 1/(2·8) = 0.0625`. This holds always, but is weak.
+- If each sample's cost lies in `[c_min, c_max]` and the sampling phase has budget `B'`, no stop is possible before
+  `B'/c_max` samples, and stopping is certain by `B'/c_min`. So `n_first ≥ ⌈B'/c_max⌉` and `n_last ≤ ⌈B'/c_min⌉`
+  (rounded to checkpoints), which gives a much tighter bound when the cost spread is small. Codex's case checks out:
+  0.5 · (1/√6688 − 1/√10432) = 0.0012 ≥ 2.49e-5.
 
 *A deadline rule.* Elapsed time only grows, so `{N > n_j} = {C(n_j) < deadline}`, where `C(n)` is the cumulative
-cost. Only checkpoints whose cumulative cost straddles the budget contribute. A block costs about 32 × the mean cost,
-much more than the spread of `C(n)`, so for a given budget one or two checkpoints dominate.
+cost. Only checkpoints whose cumulative cost straddles the budget contribute: one or two at small `n`, and more at
+large `n`, because the spread of `C(n)` grows like `√n`.
 
-*Exact computation (corrects round 3, Codex round 4 B1).* The closed form above was evaluated exactly with Binomial
-probabilities and matches a brute-force dynamic program, including Codex's case (1.2×, B = 70.4 → −0.0082789). The
-scan covered:
+*Exact computation: evidence, restricted to the model and range below (corrects round 3, Codex round 4 B1).* The
+decomposition was evaluated exactly with Binomial probabilities. It matches a brute-force dynamic program, including
+Codex's cases: 1.2×, B = 70.4 → −0.0082789; and 3×, B = 20,000 → −2.4921e-5. The scan covered:
 - values Bernoulli(p), p ∈ {0.1, 0.3, 0.5};
 - cost ratios 1.05, 1.1, 1.2, 1.5, 2 and 3, with the win either cheaper or dearer;
 - every budget on a 0.05–0.1-unit grid, from 0 up to 1,400 samples (4,000 samples for ratios 1.2, 2 and 3).
 
 | budgets that give at least … samples | 64 | 96 | 160 | 320 | 640 | 1,000 | 2,000 |
 |---|---|---|---|---|---|---|---|
-| sup \|bias\| (any ratio scanned, p = 0.5) | 0.0083 | 0.0051 | 0.0026 | 0.0010 | 0.0004 | 0.0002 | 0.0001 |
-| per-checkpoint cap | 0.0104 | 0.0064 | 0.0033 | 0.0013 | 0.0005 | 0.00025 | 0.0001 |
+| scanned sup \|bias\| (p = 0.5, ratios above) | 0.0083 | 0.0051 | 0.0026 | 0.0010 | 0.0004 | 0.0002 | 0.0001 |
+| proven `σ/√n_first`, σ = 1/2 | 0.0625 | 0.051 | 0.040 | 0.028 | 0.020 | 0.016 | 0.011 |
 
-The **cost ratio does not change the worst case**; my round 3 claim that a 1.2× ratio is negligible at every budget
-was wrong. The ratio only sets how narrow the budget window is in which the worst case occurs, which is near
-`n × mean cost`. For p = 0.3 and p = 0.1 the worst case is lower (0.0076 and 0.0050).
+Within this model and range, the cost ratio does not change the worst case. It only sets how narrow the budget
+window is in which the worst case occurs, near `n × mean cost`. My round 3 claim that a 1.2× ratio is negligible at
+every budget was wrong. For p = 0.3 and p = 0.1 the scanned worst case is lower (0.0076 and 0.0050). The scan is
+**not** claimed to hold outside the stated model and range.
 
-*Claim.* No selection bias. For a deadline-stopped mean whose first checkpoint is at `n` samples, |bias| is at most
-the per-checkpoint cap at `n` (≤ 0.0104 overall). The exact scan above confirms ≤ 0.0083 over the stated range. The
-bias is always a small fraction of the Monte Carlo standard error at the same sample count: the ratio is at most
-`≈ 16/(n + 32)`, which is 17% at 64 samples, 8% at 160 and 1.6% at 1,000, so the mean squared error grows by ≤ 3%.
-§6B9 checks it with a cost-dependent fake evaluator, at budgets placed on the checkpoint transitions.
+*Claim.*
+- No selection bias.
+- Deadline-stopping bias ≤ `σ(1/√n_first − 1/√(n_last + 32)) ≤ σ/√n_first`. This is proven, and the cost-range
+  corollary tightens it.
+- In the scanned Bernoulli model, the observed bias is ≤ 0.0083, and much smaller at larger budgets (table).
+
+No universal bias-to-standard-error ratio or MSE guarantee is claimed beyond the proven bound. §6B9 checks the
+closed form and both bounds with a cost-dependent fake evaluator, at budgets placed on the checkpoint transitions,
+including Codex's multi-checkpoint case.
 
 **Turn and flop (`len(board) in (3, 4)`): Monte Carlo, sampling the range.** Each sample draws the opponent pair
 `∝ w` from `cum`, then the `5 − len(board)` missing board cards uniformly from the cards not in `X` and not in
@@ -349,9 +370,15 @@ the contract and pinned by a test (§6D).
      - the empirical mean is within 4 SE of the **closed-form prediction**. A ~30-line helper in the test,
        `stopping_bias(c_win, c_lose, p, B)`, evaluates the §3.3 decomposition exactly with `math.comb`. For Codex's
        case it returns 0.4917211 within 1e-9, and a unit test checks it against a brute-force dynamic program.
-     - |prediction − 0.5| is at most the per-checkpoint cap at that `n` (0.0104 or 0.0033).
+     - |prediction − 0.5| is within the proven bound, which the helper's `support_bound(c_win, c_lose, p, B)` computes
+       over the uncertain checkpoints. The prediction is also checked against the telescoped form
+       `0.5 · (1/√n_first − 1/√(n_last + 32))`.
+   - **Multi-checkpoint case (Codex round 5, B1), analytic only:** `stopping_bias(1, 3, 0.5, 20000)` equals
+     −2.4921495e-5 within 1e-12, and is checked against the brute-force DP too. The test asserts that around 26
+     checkpoints are uncertain, that |bias| exceeds the per-term cap at `n_first`, which documents that the cap alone
+     is not a bound, and that it is within both the support sum and the telescoped bound.
    - **Turn:** a 3-pair turn range with the same cost rule (hero's own evaluations cost 0) and budgets near the
-     64- and 160-sample transitions. The mean over 3,000 seeds is within `4 · SE + cap(n)` of the exact turn equity
+     64- and 160-sample transitions. Each sample's cost lies in `[1, r]`, so the cost-range corollary gives `n_first` and `n_last`. The mean over 3,000 seeds is within `4 · SE + 0.5 · (1/√n_first − 1/√(n_last + 32))` of the exact turn equity
      computed in the test.
    - **Scan reproduced:** `scripts/bench_equity.py --bias` prints the §3.3 table (every ratio, p and budget listed
      there). Its output is recorded in the implementation log.
@@ -393,10 +420,10 @@ ratio. The ratio only sets how wide the budget window around each checkpoint tra
 4. **`eval_batch` deferred** to F08; scalar speed (~300k evals/s ≈ 200 samples/ms) supports ~4,000 samples in a
    20 ms decision, ±0.8 points standard error.
 5. **Deadline-stopping bias is accepted, not eliminated** (§3.3 *Bias*). Removing it would need a sample count fixed
-   in advance, which cannot coexist with a hard deadline on an unpredictable machine. The bound does not depend on
-   the cost ratio: ≤ 0.0104 analytically and 0.0083 in the exact scan, both at the 64-sample checkpoint, falling like
-   `n^(−3/2)`. It is ≤ 17% of the Monte Carlo standard error at any sample count. It is tested (§6B9) and the real
-   cost/value correlation is measured (§6F).
+   in advance, which cannot coexist with a hard deadline on an unpredictable machine. Proven:
+   `|bias| ≤ σ(1/√n_first − 1/√(n_last + 32)) ≤ σ/√n_first`, at most one standard error of an `n_first`-sample
+   mean, and much less when the per-sample cost range is narrow. Evidence (exact scan, Bernoulli model, stated
+   range only): ≤ 0.0083. It is tested (§6B9), and the real cost/value correlation is measured (§6F).
 
 ## Review log
 ### Round 1: 2026-11-11 (Codex: 5 bugs; all accepted, all fixed in round 2)
@@ -422,7 +449,12 @@ ratio. The ratio only sets how wide the budget window around each checkpoint tra
 ### Round 4: 2026-11-11 (Codex: 1 bug; accepted, fixed in round 5)
 | Bug | Severity | Finding (Codex) | Resolution (Claude) |
 |---|---|---|---|
-| B1 | minor | The claim "1.2× ratio: \|bias\| ≤ 1e-5 at every B" is false. With costs 1 and 1.2 and B = 70.4, the 64-sample checkpoint splits K at its mean, and the expected result is 0.4917211 (bias −0.0082789); B = 70 gives −0.00686. Correct the bound, add budgets near the checkpoint transitions to the exact calculation and the tests, and state the verified range. (This stays within the 0.01 allowance, so no redesign is needed.) The selection-bias fix was confirmed. | **fixed:** my round 3 numbers came from a handful of budgets that missed the transitions. §3.3 *Bias* now has: (1) an exact decomposition `E[m_N] − μ = Σ_j 32/(n_j+32) · E[1{N>n_j}(μ − m_{n_j})]` and a **per-checkpoint cap** `32/((n_j+32)·4√n_j)` that holds for any values and any stopping rule (0.0104 at 64 samples, 0.0033 at 160, 0.00025 at 1,000); (2) the observation that a deadline rule makes `{N > n_j}` = `{C(n_j) < B}`, so only transition checkpoints contribute; (3) a closed-form scan, validated against a brute-force DP and reproducing Codex's −0.0082789. It covers p ∈ {0.1, 0.3, 0.5}, ratios 1.05–3 in both directions, and every budget on a fine grid up to 1,400–4,000 samples. The sup is 0.0083 at the 64-sample transition **for every ratio**: the ratio only narrows the budget window. A table gives the sup by minimum sample count. The claim is now "≤ the cap at the first checkpoint, ≤ 17% of the standard error at any sample count" (§3.3, §8.5). §6B9 places budgets exactly on the 64- and 160-sample transitions for ratios 1.2 (including Codex's B = 70.4) and 2, and checks the empirical mean against an in-test closed-form predictor (itself checked against a DP) and the cap. `bench_equity.py --bias` reproduces the scan, and §6F's ratio measurement is now informational. The round 3 entry is annotated. |
+| B1 | minor | The claim "1.2× ratio: \|bias\| ≤ 1e-5 at every B" is false. With costs 1 and 1.2 and B = 70.4, the 64-sample checkpoint splits K at its mean, and the expected result is 0.4917211 (bias −0.0082789); B = 70 gives −0.00686. Correct the bound, add budgets near the checkpoint transitions to the exact calculation and the tests, and state the verified range. (This stays within the 0.01 allowance, so no redesign is needed.) The selection-bias fix was confirmed. | **fixed:** my round 3 numbers came from a handful of budgets that missed the transitions. §3.3 *Bias* now has: (1) an exact decomposition `E[m_N] − μ = Σ_j 32/(n_j+32) · E[1{N>n_j}(μ − m_{n_j})]` and a **per-checkpoint cap** `32/((n_j+32)·4√n_j)` that holds for any values and any stopping rule (0.0104 at 64 samples, 0.0033 at 160, 0.00025 at 1,000); (2) the observation that a deadline rule makes `{N > n_j}` = `{C(n_j) < B}`, so only transition checkpoints contribute; (3) a closed-form scan, validated against a brute-force DP and reproducing Codex's −0.0082789. It covers p ∈ {0.1, 0.3, 0.5}, ratios 1.05–3 in both directions, and every budget on a fine grid up to 1,400–4,000 samples. The sup is 0.0083 at the 64-sample transition **for every ratio**: the ratio only narrows the budget window. A table gives the sup by minimum sample count. The claim is now "≤ the cap at the first checkpoint, ≤ 17% of the standard error at any sample count" (§3.3, §8.5). §6B9 places budgets exactly on the 64- and 160-sample transitions for ratios 1.2 (including Codex's B = 70.4) and 2, and checks the empirical mean against an in-test closed-form predictor (itself checked against a DP) and the cap. `bench_equity.py --bias` reproduces the scan, and §6F's ratio measurement is now informational. The round 3 entry is annotated. *(Round 5, B1: the claim "≤ the cap at the first checkpoint, ≤ 17% of the standard error" was itself unproven. It was replaced by a proven support-sum bound.)* |
 
-### Round 5: 2026-11-11
+### Round 5: 2026-11-11 (Codex: 1 bug; accepted, fixed in round 6)
+| Bug | Severity | Finding (Codex) | Resolution (Claude) |
+|---|---|---|---|
+| B1 | minor | The per-checkpoint caps do not bound the total, because several transition checkpoints can contribute at once. Counterexample: Bernoulli(0.5), costs 1 and 3, B = 20,000 gives bias −2.492e-5, while no stop is possible before checkpoint 6,688, whose cap is 1.46e-5. This refutes the universal cap and the derived bias/SE and MSE guarantees. Keep the decomposition and the summed bound, present the scan as restricted evidence, and add this case to the analytic checks. | **fixed:** reproduced exactly (−2.4921495e-5; 26 uncertain checkpoints). The unproven claims ("≤ the cap at the first checkpoint", "≤ 17% of SE", "MSE +3%") were removed. §3.3 now proves: (1) terms with `P(N > n_j)` ∈ {0, 1} vanish, so only uncertain checkpoints count; (2) each per-term cap `16σ/((n+32)√n)` is ≤ `σ(1/√n − 1/√(n+32))` (equivalent to `√(n(n+32)) ≤ n+32`), so the support sum telescopes to `\|bias\| ≤ σ(1/√n_first − 1/√(n_last+32)) ≤ σ/√n_first`, for any values in [0, 1] and any stopping rule. A corollary bounds `n_first` and `n_last` from the per-sample cost range (Codex's case: 0.0012 ≥ 2.49e-5). The exact scan is labelled as evidence for its stated model and range only, and its table now sits beside the proven bound. §6B9 adds Codex's case as an analytic check (value, uncertain-checkpoint count, exceeds the per-term cap, within both proven bounds). The transition tests now assert the proven support bound, and the turn tolerance uses the cost-range corollary. §8.5 reworded. |
+
+### Round 6: 2026-11-11
 _Awaiting Codex review._
