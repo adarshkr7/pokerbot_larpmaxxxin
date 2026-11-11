@@ -1,14 +1,16 @@
 # F02: Cards, evaluator, equity (scalar)
 
-**Status:** in review (round 3)
+**Status:** in review (round 4)
 **Workstream:** W2 · **Strategy items:** 02/E1, 02/E3, 02/E4 (`canon3` only) · **Owner:** Claude (implements) · **Reviewer:** Codex
 
 ## 1. Goal
 A pure-Python library that later features (F04 discard, F05/F06 betting) call for hand strength and equity:
 `eval7` orders every 5–7-card hand **exactly as the engine's `best_hand` does** at ≥ 250k evals/s, and `equity`
-returns a budget-bounded estimate of win + tie/2 against a weighted opponent range that is **unbiased** (exact
-enumeration on the river when the budget allows it, otherwise an i.i.d. sample drawn in proportion to the weights)
-and agrees with exact enumeration within 4 standard errors. **No bot behaviour change.**
+returns a budget-bounded estimate of win + tie/2 against a weighted opponent range: exact enumeration on the river
+when the budget allows it, otherwise the plain mean of i.i.d. samples drawn in proportion to the weights. The choice
+between the two never looks at sampled values, so there is **no selection bias**. The only remaining bias comes from
+stopping at a wall-clock deadline when evaluation cost correlates with the outcome. It is quantified and bounded
+(§3.3 *Bias*, §6B9). Results agree with exact enumeration within 4 standard errors. **No bot behaviour change.**
 
 ## 2. Scope
 **In:** `bot/cards.py` (additions), `bot/evaluator.py` (`eval7`), `bot/equity.py` (`equity`, sampling helpers,
@@ -88,30 +90,59 @@ excluded cards), `equity` returns `(0.5, 0.0)`. `cum` is the running sum for wei
 
 **Showdown value** `v(hero, opp) = 1` if `hero > opp`, `0.5` if equal, else `0`, from `eval7` on the full 7 cards.
 
-**River (`len(board) == 5`): weighted i.i.d. sampling, upgraded to exact enumeration only when it fits, always
-interruptible.** Hero's value is evaluated once. Let `P` be the number of valid pairs (≤ 903 in a real hand:
-52 − 3 − 5 − 1 = 43 cards). Two estimators exist; neither is ever replaced by a truncated mix of the two:
-- *i.i.d.:* pairs drawn `∝ w` with replacement (from `cum`); estimate = the **plain mean** of `v`, unbiased for any
-  weights (`E[v] = Σ w·v / Σ w`); `n_eff = n`.
+**River (`len(board) == 5`): exact enumeration when it fits, otherwise weighted i.i.d. sampling. The choice uses
+only rng-free work.** Hero's value is evaluated once. Let `P` be the number of valid pairs (≤ 903 in a real hand:
+52 − 3 − 5 − 1 = 43 cards). `PAIRS` order (canonical) is the enumeration order. Two estimators exist; neither is ever
+replaced by a truncated mix of the two:
+- *i.i.d.:* pairs drawn `∝ w` with replacement (from `cum`); estimate = the **plain mean** of `v`. For a fixed sample
+  count this is unbiased for any weights (`E[v] = Σ w·v / Σ w`); `n_eff = n`.
 - *exact:* all `P` pairs; estimate `Σ w·v / Σ w`; `n_eff = (Σw)² / Σw²`.
+
+**Selection rule (Codex round 3, B1).** The decision between the two must not depend on any sample that the returned
+estimate uses. Round 3 calibrated on the first `MIN_SAMPLES` i.i.d. samples and then either kept their mean or
+replaced it with the exact value. If evaluation cost depends on the hand, that choice correlates with the sample
+values, and the result is biased: Codex's example gives an expected 0.4829 against a true 0.5. Now calibration
+uses the **first pairs of the deterministic enumeration**, which consume no randomness. The selection is then a
+function of the inputs and machine timing only, so it is independent of the rng draws behind any i.i.d. estimate.
+The calibration work is never wasted: if the upgrade goes ahead, those pairs are already part of the enumeration.
 
 Procedure, with the deadline formed at function entry (§Budget):
 1. **`b = +inf`:** exact enumeration, nothing else (deterministic; used by tests and by callers that want exactness).
-2. **Phase 1 (always, finite `b`):** `MIN_SAMPLES` i.i.d. samples. This yields a valid estimate and **calibrates the
-   cost on the machine we are running on**: `t_pair = phase-1 elapsed / MIN_SAMPLES` (an i.i.d. sample costs at least
-   as much as an enumerated pair, so this is conservative).
-3. **Upgrade decision:** if `remaining = deadline − _now() ≥ RIVER_SAFETY · P · t_pair` (`RIVER_SAFETY = 1.5`),
-   enumerate exactly, checking the deadline every `CHECK_EVERY` pairs. If it **completes**, return the exact
-   result. If the deadline passes first (the machine slowed down after calibration), **discard the partial
-   enumeration** and return the phase-1 i.i.d. estimate.
-4. **Otherwise:** continue i.i.d. sampling (same rules as the turn/flop: deadline every `CHECK_EVERY`,
-   `MAX_SAMPLES` cap) and return the plain mean of all i.i.d. samples.
+2. **`b = 0`** (after normalisation): straight to i.i.d., exactly `MIN_SAMPLES` samples, with no calibration. This
+   depends on `b` alone.
+3. **Calibration (finite `b > 0`):** enumerate the first `CAL = min(MIN_SAMPLES, P)` pairs in canonical order,
+   checking the deadline every `CHECK_EVERY` pairs. If `CAL == P`, the enumeration is complete: return exact. If
+   the deadline passes during calibration, go to step 5 (fallback). Otherwise `t_pair = calibration elapsed / CAL`.
+4. **Upgrade decision:** if `remaining = deadline − _now() ≥ RIVER_SAFETY · (P − CAL) · t_pair`
+   (`RIVER_SAFETY = 1.5`), continue the enumeration, checking the deadline every `CHECK_EVERY` pairs. If it
+   **completes**, return the exact result. If the deadline passes first (the machine slowed down after
+   calibration), **discard the partial enumeration** and go to step 5. If the upgrade does not fit, go to step 6.
+5. **Fallback (deadline already passed):** exactly `MIN_SAMPLES` fresh i.i.d. samples, a fixed count with no deadline
+   checks. Return their plain mean. No randomness was consumed before this step, and the event that led here depends
+   only on rng-free work, so this mean is unbiased.
+6. **No upgrade:** i.i.d. sampling to the deadline (same rules as the turn/flop: at least `MIN_SAMPLES`, deadline
+   checked every `CHECK_EVERY`, `MAX_SAMPLES` cap). Return the plain mean.
 
-So every finite-budget river call returns either the exact value or an unbiased i.i.d. mean, and never runs more than
-one `CHECK_EVERY` block past the deadline (beyond the `MIN_SAMPLES` floor). A partial enumeration is never returned:
-with concentrated weights it is badly biased (Codex round 1, B1: one winning pair of weight 1e6 among 127 losing pairs
-of weight 1, exact 0.999873, a 64-pair subset averages 0.5). Locally a full enumeration costs ~3–4 ms, so budgets of
-≥ ~6 ms get exact rivers; a slower judge self-adjusts through step 2.
+A partial enumeration is never returned: with concentrated weights it is badly biased (Codex round 1, B1: one winning
+pair of weight 1e6 among 127 losing pairs of weight 1, exact 0.999873, a 64-pair subset averages 0.5). Locally a full
+enumeration costs ~3–4 ms, so budgets of ≥ ~6 ms get exact rivers; a slower judge self-adjusts through step 3. The
+canonical-order prefix may be cheaper or dearer than the average pair. `RIVER_SAFETY` absorbs moderate mismatch,
+step 5 handles the rest, and step 5 is never biased.
+
+**Bias (all streets).** With a fixed sample count, the i.i.d. and Monte Carlo means are unbiased. Every finite
+budget stops at a wall-clock deadline, though, and if a sample's evaluation cost correlates with its value, the
+stopping point correlates with the running mean. This is a small bias that **is not eliminated** (it would need a
+sample count fixed in advance, and then a hard deadline would be impossible). It is bounded instead. Model: values
+1 and 0 with p = 0.5; checkpoints at 64 and then every 32; budget B in units of the cheaper evaluation. Exact
+dynamic programming over the stopping rule gives:
+- **2× cost ratio, perfectly correlated** (Codex's adversarial case): bias −0.0083 at B = 96 (the worst case,
+  ≈ 64 samples), −0.0015 at B = 200, ≤ −0.0003 at B ≥ 400.
+- **1.2× ratio:** |bias| ≤ 1e-5 at every B.
+
+A real `eval7` call's cost varies with the opponent's hand category by far less than 2× (measured in §6F). Our
+callers' budgets give hundreds of samples, so the bias is several orders of magnitude below the Monte Carlo standard
+error (~0.016 at 1,000 samples). The plan therefore claims **"no selection bias; deadline-stopping bias ≤ 0.01 even
+for a 2× fully correlated cost"**, not exact unbiasedness. §6B9 checks this bound with a cost-dependent fake evaluator.
 
 **Turn and flop (`len(board) in (3, 4)`): Monte Carlo, sampling the range.** Each sample draws the opponent pair
 `∝ w` from `cum`, then the `5 − len(board)` missing board cards uniformly from the cards not in `X` and not in
@@ -129,10 +160,13 @@ saving of the enumeration idea without the bias.
 `+inf` stays `+inf`. Then, **at function entry, before range preparation** (so preparation time counts against the
 budget), `deadline = _now() + b / 1000` (`+inf` when `b` is infinite). `_now` (= `time.perf_counter`) and `_eval`
 (= `evaluator.eval7`) are module attributes that `equity.py` calls through, so tests can substitute a fake clock and
-a slow evaluator. The deadline is checked every `CHECK_EVERY` samples (or enumerated pairs), never before
-`MIN_SAMPLES` samples. So: `b = 0` → exactly `MIN_SAMPLES` (a panic-tier caller still gets a usable answer for
-≈ 0.3 ms); `b = +inf` → exactly `MAX_SAMPLES` on the turn/flop and exact enumeration on the river.
-**Time bound** for every finite-budget call: `elapsed ≤ max(b, prep + MIN_SAMPLES samples) + one CHECK_EVERY block`.
+a slow evaluator. The deadline is checked every `CHECK_EVERY` samples (or enumerated pairs). A sampling loop never
+stops before `MIN_SAMPLES` samples. So: `b = 0` → exactly `MIN_SAMPLES` (a panic-tier caller still gets a usable
+answer for ≈ 0.3 ms); `b = +inf` → exactly `MAX_SAMPLES` on the turn/flop and exact enumeration on the river.
+**Time bound** for every finite-budget call: `elapsed ≤ max(b, prep) + one CHECK_EVERY block + MIN_SAMPLES samples`.
+On the turn and flop, and on the river's no-upgrade path, this tightens to the round 3 form
+`max(b, prep + MIN_SAMPLES samples) + one block`. The extra `MIN_SAMPLES` term only applies to the river fallback
+(step 5), which runs after an interrupted calibration or upgrade.
 
 **Common random numbers.** A sample is a tuple `(opp_pair, runout)`: the opponent's 2 final hole cards and the
 `5 − len(board)` missing board cards.
@@ -194,8 +228,9 @@ the contract and pinned by a test (§6D).
 ## 5. Failure handling and time
 - All functions are pure; nothing touches stdout or files. They can raise only on caller contract violations (e.g.
   a hero card id of 52). Callers in F04+ run inside the F01 firewall, which falls back on any exception.
-- Every finite-budget `equity` call, on every street, satisfies `elapsed ≤ max(budget, prep + MIN_SAMPLES samples)
-  + one CHECK_EVERY block`, measured from function entry (preparation included). This holds on a slow machine too:
+- Every finite-budget `equity` call, on every street, satisfies `elapsed ≤ max(budget, prep) + one CHECK_EVERY block
+  + MIN_SAMPLES samples`, measured from function entry (preparation included). The `MIN_SAMPLES` term is reached
+  only by the river fallback, ≈ 0.3 ms locally. This holds on a slow machine too:
   nothing runs to completion unconditionally except the `budget_ms = +inf` paths, which callers use only offline or
   in tests. The `MIN_SAMPLES` floor is ≈ 0.3 ms locally; the `MAX_SAMPLES` ceiling is ≈ 100 ms (callers pass
   budgets ≤ 400 ms per the F01 clock).
@@ -245,13 +280,19 @@ the contract and pinned by a test (§6D).
    - `budget_ms` 0, −5, NaN, `"x"` → exactly `MIN_SAMPLES` (turn, flop and river); `+inf` → exactly `MAX_SAMPLES`
      (turn, flop) and a complete enumeration (river); a finite budget stops at the first `CHECK_EVERY` boundary past
      the deadline.
-   - **River, fast machine** (3 µs/eval, 903 pairs, 10 ms budget): phase 1 calibrates, the enumeration fits, the
-     result equals the exact value.
-   - **River, slow machine** (20 µs/eval, 6 ms budget, Codex round 2 B1's case): the upgrade is not attempted; the
-     result is the i.i.d. mean and fake elapsed ≤ 6 ms + one `CHECK_EVERY` block.
-   - **River, slowdown after calibration** (3 µs/eval for the first `MIN_SAMPLES` evals, then 20 µs; 10 ms budget,
-     so 1.5 × 903 × 3 µs ≈ 4 ms fits but the real 18 ms does not): the upgrade starts, is interrupted at the deadline, and the call returns the phase-1 i.i.d. estimate (equal to the mean of
-     those `MIN_SAMPLES` samples, recomputed in the test from the same seed), with fake elapsed ≤ budget + one block.
+   - **River, fast machine** (3 µs/eval, 903 pairs, 10 ms budget): the calibration prefix runs, the enumeration fits,
+     the result equals the exact value, and **the rng is untouched** (its state is unchanged after the call).
+   - **River, slow machine** (20 µs/eval, 6 ms budget, Codex round 2 B1's case): calibration (64 pairs ≈ 1.3 ms) shows
+     that the upgrade does not fit; the result is the i.i.d. mean, and fake elapsed ≤ 6 ms + one `CHECK_EVERY` block.
+   - **River, slowdown after calibration** (3 µs/eval for the first `MIN_SAMPLES` evals after hero's, then 20 µs;
+     10 ms budget, so 1.5 × 839 × 3 µs ≈ 3.8 ms fits but the real ~17 ms does not): the upgrade starts and is
+     interrupted at the deadline. The call returns the step-5 fallback, which equals the mean of exactly
+     `MIN_SAMPLES` i.i.d. samples recomputed in the test from a fresh generator with the same seed. Fake elapsed
+     ≤ budget + one block + `MIN_SAMPLES` evals.
+   - **River, deadline passes during calibration** (20 µs/eval, 0.5 ms budget): fallback with exactly `MIN_SAMPLES`
+     samples; fake elapsed ≤ budget + one block + `MIN_SAMPLES` evals.
+   - **River, `P ≤ MIN_SAMPLES`** (a 40-pair range, finite budget): calibration covers the whole range, so the result
+     is exact.
    - Separately, **one real-time check**: a 5 ms budget returns within 5 ms + 2 ms slack (timing only, no equality
      assertions).
 8. *Triple samples:* over 5,000 `deal_triple_samples` with a recording `keep_fn`: the kept pair is 2 distinct cards
@@ -261,6 +302,19 @@ the contract and pinned by a test (§6D).
    triples exactly), `equity_vs_samples` over 20,000 triple samples with a deterministic `keep_fn` (keep the two
    highest ranks) agrees within 4 SE with the exact average over all triples, computed in the test with
    `engine.best_hand`. Exclusion on the flop is covered by the hygiene checks above.
+9. *Cost-dependent evaluator (Codex round 3, B1):* same harness as 7. The fake `_eval` is memoised over `eval7` so the
+   test stays fast. It advances fake time by **1 unit (10 µs) when the evaluated hand is below hero's value and 2
+   units otherwise**, so cost is perfectly correlated with the sample's value, as in Codex's counterexample.
+   - **Codex's exact case:** two equally weighted pairs, one losing to hero and one beating hero, budget 96 units.
+     Since `P ≤ MIN_SAMPLES`, calibration completes the enumeration, and **every** seed (500 seeds) returns exactly
+     0.5. The round 3 design's expectation was 0.4829.
+   - **Selection is rng-free:** a 400-pair range (200 pairs below hero, 200 above, weight 1, true equity 0.5) at a
+     budget where the upgrade does not fit. Asserted: the calibration's elapsed fake time and the upgrade decision
+     are identical for every seed (they do not depend on the rng). A budget where the upgrade fits returns exactly
+     0.5 for every seed.
+   - **Deadline-stopping bias bound:** the same 400-pair range at budgets of 96, 200 and 400 units (i.i.d. path),
+     2,000 seeds each. The mean estimate is within `4 · SE + 0.01` of 0.5, the §3.3 *Bias* bound. Same for a turn
+     range against its exact value (computed in the test).
 
 **C. Cards.** `pair_index` is a bijection onto `0..1325` and `PAIRS` is its inverse; `deck_without(dead_mask(x))`
 excludes exactly `x`.
@@ -275,6 +329,9 @@ imports the new modules yet, but this proves it).
 
 **F. Benchmarks (recorded in the review log, `scripts/bench_equity.py`).** `eval7` evals/s on random 7-card hands
 (target ≥ 250k locally); `equity` samples/ms on flop, turn and river (river: ms per full enumeration); import time.
+**Cost/value correlation:** the mean `eval7` time for opponent hands that beat hero vs hands that lose, over random
+rivers, and the spread of cost by hand category. This is the input to the §3.3 *Bias* model. If the ratio exceeds
+1.5, the record says so and the bias bound is recomputed for the measured ratio before F04 relies on it.
 
 ## 7. Acceptance criteria
 - [ ] §6A–D pass; `pytest` green; `scripts/build.py --check` passes.
@@ -283,16 +340,22 @@ imports the new modules yet, but this proves it).
 - [ ] `agents/INTERFACES.md` updated with the §2 changes; `strategies/02_*` E1, E3, E4 `Status:` lines updated.
 
 ## 8. Risks and open questions (for the reviewer)
-1. **Monte Carlo vs exact on the turn.** Chosen: joint sampling with a hero cache (unbiased, best variance per eval).
+1. **Monte Carlo vs exact on the turn.** Chosen: joint sampling with a hero cache (unbiased for a fixed sample count, best variance per eval).
    The alternative (enumerate rivers for the top-K pairs) is biased by the truncation.
-2. **River: i.i.d. first, exact only if it fits.** The upgrade decision uses the cost measured in phase 1 on the
-   running machine, and the enumeration stays interruptible; an interrupted enumeration is discarded (its time is
-   lost, the result stays unbiased). With `RIVER_SAFETY = 1.5` this should be rare.
+2. **River: rng-free calibration, then exact or i.i.d.** The upgrade decision uses the cost of the enumeration's
+   first `MIN_SAMPLES` pairs, measured on the running machine, and consumes no randomness, so it cannot correlate
+   with any returned sample. The enumeration stays interruptible. An interrupted enumeration is discarded (its time
+   is lost), and a fixed-count fallback of `MIN_SAMPLES` fresh samples is returned; this costs ≈ 0.3 ms beyond the
+   deadline. With `RIVER_SAFETY = 1.5` this should be rare.
 3. **3-card hero equity** (flop betting before the discard) is not in F02. F04/F06 compose it from
    `deal_triple_samples` (the opponent's discard modelled per triple, all three of their cards excluded from the
    runout) + `equity_vs_samples` (max over our 3 keeps on common samples).
 4. **`eval_batch` deferred** to F08; scalar speed (~300k evals/s ≈ 200 samples/ms) supports ~4,000 samples in a
    20 ms decision, ±0.8 points standard error.
+5. **Deadline-stopping bias is accepted, not eliminated** (§3.3 *Bias*). Removing it would need a sample count fixed
+   in advance, which cannot coexist with a hard deadline on an unpredictable machine. The bound (≤ 0.0083 in the
+   worst adversarial case, ≤ 1e-5 at a 1.2× cost ratio) is far below Monte Carlo noise, and it is tested (§6B9)
+   and measured (§6F).
 
 ## Review log
 ### Round 1: 2026-11-11 (Codex: 5 bugs; all accepted, all fixed in round 2)
@@ -310,5 +373,10 @@ imports the new modules yet, but this proves it).
 | B1 | major | The river's exact path runs to completion based on a fixed 6 µs/pair estimate; at 20 µs/eval a 6 ms budget takes ~18 ms, breaking the per-call deadline. | **fixed:** finite-budget river calls now start with `MIN_SAMPLES` i.i.d. weighted samples (a valid unbiased estimate), which also **measure the per-eval cost on the running machine**; exact enumeration is attempted only if `1.5 × P × measured cost` fits in the remaining time, stays interruptible, and if interrupted is discarded in favour of the i.i.d. estimate; otherwise i.i.d. sampling continues to the deadline. Only `budget_ms = +inf` enumerates unconditionally. The deadline is now formed at function entry, so preparation counts. Stated bound: `elapsed ≤ max(budget, prep + MIN_SAMPLES) + one CHECK_EVERY block` (§3.3, §Budget, §5, §8.2; `RIVER_US_PER_PAIR` replaced by `RIVER_SAFETY`). §6B7 adds a simulated-machine harness (fake `_now` advanced by a fake `_eval`) with fast, slow (B1's exact case) and slows-after-calibration river tests. |
 | B2 | minor | Max-rescaling can change weight ratios in the last bit, so exact equality across scales can fail for a correct implementation. | **fixed:** §6B5 split: exact equality only for the same numbers in different formats (bit-identical after rescaling); across scales, `math.isclose(rel_tol=1e-12)` for river exact equity and `n_eff`, and for Monte Carlo each scale is checked against the exact value within 4 SE, with no cross-scale equality. |
 
-### Round 3: 2026-11-11
+### Round 3: 2026-11-11 (Codex: 1 bug; accepted, fixed in round 4)
+| Bug | Severity | Finding (Codex) | Resolution (Claude) |
+|---|---|---|---|
+| B1 | major | The phase-1 samples both supply the fallback estimate and measure the cost that decides whether to replace it with exact equity. If evaluation cost depends on the hand, this selection correlates with the sample values. Codex's counterexample (pairs worth 1 and 0 costing 1 and 2 units, budget 96) gives an expected 0.4829 against a true 0.5. A mean stopped by outcome-dependent elapsed time also needs treatment. | **fixed:** (1) *Selection:* calibration now runs on the first `min(MIN_SAMPLES, P)` pairs of the deterministic enumeration, which consumes no randomness. The exact-vs-i.i.d. choice therefore depends only on the inputs and machine timing, never on a returned sample. The prefix counts towards the enumeration if the upgrade goes ahead. An interrupted calibration or upgrade falls back to exactly `MIN_SAMPLES` fresh i.i.d. samples (fixed count, so unbiased). `b = 0` skips calibration (§3.3 steps 1–6). The time bound becomes `max(b, prep) + one block + MIN_SAMPLES samples` (the extra term applies only to the river fallback) (§Budget, §5). (2) *Deadline stopping:* adopted as an approximate estimator with a quantified bound rather than claiming unbiasedness (§1, §3.3 *Bias*, §8.5). Exact dynamic programming over the stopping rule: worst case −0.0083 for a 2× perfectly correlated cost at a 96-unit budget, ≤ 0.0003 at ≥ 400 units, ≤ 1e-5 for a 1.2× ratio. (3) *Tests:* new §6B9 uses a cost-dependent fake evaluator. Codex's exact case now returns exactly 0.5 on every seed; the test asserts that the calibration time and upgrade decision are identical across seeds; and the deadline-stopping bias stays within `4·SE + 0.01` at 96, 200 and 400 units on the river and turn. §6B7's river cases were updated for the new calibration; two cases were added (deadline during calibration, `P ≤ MIN_SAMPLES`). §6F measures the real `eval7` cost/value correlation. |
+
+### Round 4: 2026-11-11
 _Awaiting Codex review._
