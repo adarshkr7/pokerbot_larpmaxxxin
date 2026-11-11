@@ -1,6 +1,6 @@
 # F02: Cards, evaluator, equity (scalar)
 
-**Status:** in review (round 2)
+**Status:** in review (round 3)
 **Workstream:** W2 · **Strategy items:** 02/E1, 02/E3, 02/E4 (`canon3` only) · **Owner:** Claude (implements) · **Reviewer:** Codex
 
 ## 1. Goal
@@ -88,18 +88,30 @@ excluded cards), `equity` returns `(0.5, 0.0)`. `cum` is the running sum for wei
 
 **Showdown value** `v(hero, opp) = 1` if `hero > opp`, `0.5` if equal, else `0`, from `eval7` on the full 7 cards.
 
-**River (`len(board) == 5`): exact enumeration if affordable, else weighted i.i.d. sampling.** Hero's value is
-evaluated once. Let `P` be the number of valid pairs (≤ 903 in a real hand: 52 − 3 − 5 − 1 = 43 cards).
-- **Decided up front, never truncated:** exact iff `P · RIVER_US_PER_PAIR ≤ budget_ms · 1000` (budget normalised as
-  below; `RIVER_US_PER_PAIR = 6.0`, conservative against the ~3.5 µs measured locally). Exact enumeration always runs
-  to completion, so its result is exactly `Σ w·v / Σ w`, and `n_eff = (Σw)² / Σw²`. Its overshoot, if the estimate is
-  wrong, is bounded by `P ≤ 990` evals (≈ 4 ms locally).
-- **Otherwise:** i.i.d. samples of the pair drawn `∝ w` (with replacement, from `cum`), estimate = the **plain mean**
-  of `v`, which is unbiased for any weights (`E[v] = Σ w·v / Σ w`); `n_eff = n`; the usual `MIN_SAMPLES` /
-  `CHECK_EVERY` / deadline / `MAX_SAMPLES` rules apply.
-- A partial enumeration (a weighted average over a uniformly random subset) is never returned: with concentrated
-  weights it is badly biased (Codex round 1, B1: one winning pair of weight 1e6 among 127 losing pairs of weight 1,
-  exact 0.999873, a 64-pair subset averages 0.5).
+**River (`len(board) == 5`): weighted i.i.d. sampling, upgraded to exact enumeration only when it fits, always
+interruptible.** Hero's value is evaluated once. Let `P` be the number of valid pairs (≤ 903 in a real hand:
+52 − 3 − 5 − 1 = 43 cards). Two estimators exist; neither is ever replaced by a truncated mix of the two:
+- *i.i.d.:* pairs drawn `∝ w` with replacement (from `cum`); estimate = the **plain mean** of `v`, unbiased for any
+  weights (`E[v] = Σ w·v / Σ w`); `n_eff = n`.
+- *exact:* all `P` pairs; estimate `Σ w·v / Σ w`; `n_eff = (Σw)² / Σw²`.
+
+Procedure, with the deadline formed at function entry (§Budget):
+1. **`b = +inf`:** exact enumeration, nothing else (deterministic; used by tests and by callers that want exactness).
+2. **Phase 1 (always, finite `b`):** `MIN_SAMPLES` i.i.d. samples. This yields a valid estimate and **calibrates the
+   cost on the machine we are running on**: `t_pair = phase-1 elapsed / MIN_SAMPLES` (an i.i.d. sample costs at least
+   as much as an enumerated pair, so this is conservative).
+3. **Upgrade decision:** if `remaining = deadline − _now() ≥ RIVER_SAFETY · P · t_pair` (`RIVER_SAFETY = 1.5`),
+   enumerate exactly, checking the deadline every `CHECK_EVERY` pairs. If it **completes**, return the exact
+   result. If the deadline passes first (the machine slowed down after calibration), **discard the partial
+   enumeration** and return the phase-1 i.i.d. estimate.
+4. **Otherwise:** continue i.i.d. sampling (same rules as the turn/flop: deadline every `CHECK_EVERY`,
+   `MAX_SAMPLES` cap) and return the plain mean of all i.i.d. samples.
+
+So every finite-budget river call returns either the exact value or an unbiased i.i.d. mean, and never runs more than
+one `CHECK_EVERY` block past the deadline (beyond the `MIN_SAMPLES` floor). A partial enumeration is never returned:
+with concentrated weights it is badly biased (Codex round 1, B1: one winning pair of weight 1e6 among 127 losing pairs
+of weight 1, exact 0.999873, a 64-pair subset averages 0.5). Locally a full enumeration costs ~3–4 ms, so budgets of
+≥ ~6 ms get exact rivers; a slower judge self-adjusts through step 2.
 
 **Turn and flop (`len(board) in (3, 4)`): Monte Carlo, sampling the range.** Each sample draws the opponent pair
 `∝ w` from `cum`, then the `5 − len(board)` missing board cards uniformly from the cards not in `X` and not in
@@ -114,11 +126,13 @@ rivers for fewer pairs (the per-pair variance is multiplied by ~44 evals per pai
 saving of the enumeration idea without the bias.
 
 **Budget.** First normalise: `b = budget_ms` if it is a real number (not bool), else 0; NaN, 0 and negatives → 0;
-`+inf` stays `+inf`. Then `deadline = _now() + b / 1000` (`+inf` when `b` is infinite; `_now` is a module attribute,
-`time.perf_counter`, so tests can substitute a fake clock as in `timing.py`). The deadline is checked every
-`CHECK_EVERY` samples, never before `MIN_SAMPLES` samples. So: `b = 0` → exactly `MIN_SAMPLES` (a panic-tier caller
-still gets a usable answer for ≈ 0.3 ms); `b = +inf` → exactly `MAX_SAMPLES` (river: exact enumeration). Overshoot is
-at most `CHECK_EVERY` samples (≈ 0.2 ms).
+`+inf` stays `+inf`. Then, **at function entry, before range preparation** (so preparation time counts against the
+budget), `deadline = _now() + b / 1000` (`+inf` when `b` is infinite). `_now` (= `time.perf_counter`) and `_eval`
+(= `evaluator.eval7`) are module attributes that `equity.py` calls through, so tests can substitute a fake clock and
+a slow evaluator. The deadline is checked every `CHECK_EVERY` samples (or enumerated pairs), never before
+`MIN_SAMPLES` samples. So: `b = 0` → exactly `MIN_SAMPLES` (a panic-tier caller still gets a usable answer for
+≈ 0.3 ms); `b = +inf` → exactly `MAX_SAMPLES` on the turn/flop and exact enumeration on the river.
+**Time bound** for every finite-budget call: `elapsed ≤ max(b, prep + MIN_SAMPLES samples) + one CHECK_EVERY block`.
 
 **Common random numbers.** A sample is a tuple `(opp_pair, runout)`: the opponent's 2 final hole cards and the
 `5 − len(board)` missing board cards.
@@ -156,7 +170,7 @@ Total 1,755. The index is the position of the key in the **sorted** list of all 
 the contract and pinned by a test (§6D).
 
 ### 3.5 `params.py` (`# --- W2 ---`)
-`MIN_SAMPLES = 64`, `MAX_SAMPLES = 20000`, `CHECK_EVERY = 32`, `RIVER_US_PER_PAIR = 6.0`.
+`MIN_SAMPLES = 64`, `MAX_SAMPLES = 20000`, `CHECK_EVERY = 32`, `RIVER_SAFETY = 1.5`.
 
 ## 4. Edge cases
 1. Wheel (`A2345`) and steel wheel (straight flush to 5): high card 3; `A2345` loses to `23456`.
@@ -180,8 +194,11 @@ the contract and pinned by a test (§6D).
 ## 5. Failure handling and time
 - All functions are pure; nothing touches stdout or files. They can raise only on caller contract violations (e.g.
   a hero card id of 52). Callers in F04+ run inside the F01 firewall, which falls back on any exception.
-- Time per `equity` call is bounded by `budget_ms` plus one `CHECK_EVERY` block, with a floor of `MIN_SAMPLES`
-  (≈ 0.3 ms) and a ceiling of `MAX_SAMPLES` (≈ 100 ms at worst; callers pass budgets ≤ 400 ms per the F01 clock).
+- Every finite-budget `equity` call, on every street, satisfies `elapsed ≤ max(budget, prep + MIN_SAMPLES samples)
+  + one CHECK_EVERY block`, measured from function entry (preparation included). This holds on a slow machine too:
+  nothing runs to completion unconditionally except the `budget_ms = +inf` paths, which callers use only offline or
+  in tests. The `MIN_SAMPLES` floor is ≈ 0.3 ms locally; the `MAX_SAMPLES` ceiling is ≈ 100 ms (callers pass
+  budgets ≤ 400 ms per the F01 clock).
 - Import cost: `PAIRS` (1,326 tuples) + `canon3` keys (1,755) + straight masks: target < 20 ms, measured in §6F.
 
 ## 6. Tests (check two ways)
@@ -209,17 +226,34 @@ the contract and pinned by a test (§6D).
    4-SE tolerance.
 4. *Sampling hygiene:* over 20,000 `deal_samples`, no dealt card is in `dead ∪ board`, no card repeats within a
    sample, and pair frequencies match the weights (chi-square, p > 0.001, seeded).
-5. *Weights formats and scale* (deterministic only: no wall-clock dependence): `None`, a 1,326 list, a dict and a
-   numpy array give identical `deal_samples` with the same seed, and identical `equity` with `budget_ms = inf`
-   (fixed `MAX_SAMPLES` count; river: exact). The same range multiplied by 1e300, by 1e-300 and by 1 gives identical
-   results, all finite, `n_eff` finite. NaN / negative / all-zero / fully blocked ranges fall back to uniform.
+5. *Weights formats and scale* (deterministic only: no wall-clock dependence).
+   - **Formats, exact equality:** the same numeric weights as a 1,326 list, a dict and a numpy array (and `None` vs a
+     list of all ones) give identical `deal_samples` with the same seed, and identical `equity` with
+     `budget_ms = inf` (fixed `MAX_SAMPLES` count; river: exact). Same numbers in the same canonical order, so the
+     rescaled values are bit-identical.
+   - **Scale, tolerance:** rescaling by the maximum can change ratios in the last bit (Codex round 2, B2: weights
+     [1, 3, 7] give 0.7727272727272727 at scale 1 and …728 at 1e-300). So the same range multiplied by 1, 1e300 and
+     1e-300 is compared with `math.isclose(rel_tol=1e-12)` for the river exact equity and for `n_eff`, all values
+     finite. For Monte Carlo (turn), each scale's estimate (`budget_ms = inf`) must be finite and within 4 SE of the
+     exact value; no cross-scale equality is asserted for sampled results.
+   - NaN / negative / all-zero / fully blocked ranges fall back to uniform.
 6. *CRN:* `equity_vs_samples` on the same samples is deterministic, and for a dominated keep (e.g. 72o vs AA on
    a low board) the difference has the expected sign.
-7. *Budget with a fake clock* (`equity._now` replaced by a counter that advances a fixed step per call, so sample
-   counts are exact): `budget_ms` 0, −5, NaN, `"x"` → exactly `MIN_SAMPLES` (turn, flop, and river i.i.d. path);
-   `+inf` → exactly `MAX_SAMPLES` (turn, flop) and full enumeration (river); a finite budget stops at the first
-   `CHECK_EVERY` boundary past the deadline. Separately, **one real-time check**: a 5 ms budget returns within
-   5 ms + 2 ms slack (timing only, no equality assertions).
+7. *Budget with a simulated machine:* `equity._now` returns a fake time, and `equity._eval` is replaced by a wrapper
+   around `eval7` that advances the fake time by a configurable cost per call (other code takes zero fake time), so
+   sample counts and elapsed fake time are exact.
+   - `budget_ms` 0, −5, NaN, `"x"` → exactly `MIN_SAMPLES` (turn, flop and river); `+inf` → exactly `MAX_SAMPLES`
+     (turn, flop) and a complete enumeration (river); a finite budget stops at the first `CHECK_EVERY` boundary past
+     the deadline.
+   - **River, fast machine** (3 µs/eval, 903 pairs, 10 ms budget): phase 1 calibrates, the enumeration fits, the
+     result equals the exact value.
+   - **River, slow machine** (20 µs/eval, 6 ms budget, Codex round 2 B1's case): the upgrade is not attempted; the
+     result is the i.i.d. mean and fake elapsed ≤ 6 ms + one `CHECK_EVERY` block.
+   - **River, slowdown after calibration** (3 µs/eval for the first `MIN_SAMPLES` evals, then 20 µs; 10 ms budget,
+     so 1.5 × 903 × 3 µs ≈ 4 ms fits but the real 18 ms does not): the upgrade starts, is interrupted at the deadline, and the call returns the phase-1 i.i.d. estimate (equal to the mean of
+     those `MIN_SAMPLES` samples, recomputed in the test from the same seed), with fake elapsed ≤ budget + one block.
+   - Separately, **one real-time check**: a 5 ms budget returns within 5 ms + 2 ms slack (timing only, no equality
+     assertions).
 8. *Triple samples:* over 5,000 `deal_triple_samples` with a recording `keep_fn`: the kept pair is 2 distinct cards
    of the triple the policy was shown; **no runout card is any of the 3 opponent cards** (the discarded one
    included), nor in `dead ∪ board`; a `keep_fn` that raises or returns `(c, c)` / a card outside the triple yields
@@ -251,8 +285,9 @@ imports the new modules yet, but this proves it).
 ## 8. Risks and open questions (for the reviewer)
 1. **Monte Carlo vs exact on the turn.** Chosen: joint sampling with a hero cache (unbiased, best variance per eval).
    The alternative (enumerate rivers for the top-K pairs) is biased by the truncation.
-2. **River: exact or i.i.d., decided up front** from a fixed cost constant (`RIVER_US_PER_PAIR`). On a slower judge
-   the exact path may overshoot its budget by at most one enumeration (≤ 990 evals); the clock's reserve covers it.
+2. **River: i.i.d. first, exact only if it fits.** The upgrade decision uses the cost measured in phase 1 on the
+   running machine, and the enumeration stays interruptible; an interrupted enumeration is discarded (its time is
+   lost, the result stays unbiased). With `RIVER_SAFETY = 1.5` this should be rare.
 3. **3-card hero equity** (flop betting before the discard) is not in F02. F04/F06 compose it from
    `deal_triple_samples` (the opponent's discard modelled per triple, all three of their cards excluded from the
    runout) + `equity_vs_samples` (max over our 3 keeps on common samples).
@@ -263,11 +298,17 @@ imports the new modules yet, but this proves it).
 ### Round 1: 2026-11-11 (Codex: 5 bugs; all accepted, all fixed in round 2)
 | Bug | Severity | Finding (Codex) | Resolution (Claude) |
 |---|---|---|---|
-| B1 | major | A budget-truncated river enumeration (weighted average over a uniform random subset) can be severely biased with a concentrated range (exact 0.999873, expected estimate 0.5). | **fixed:** the river path is chosen up front and never truncated: exact enumeration iff `P · RIVER_US_PER_PAIR ≤ budget` (runs to completion, overshoot ≤ 990 evals), else i.i.d. samples drawn `∝ w` with a plain mean, which is unbiased for any weights (§3.3). §1 and §8.2 reworded. New test §6B1 (second bullet) uses exactly this concentrated range with a zero budget across 200 seeds. |
+| B1 | major | A budget-truncated river enumeration (weighted average over a uniform random subset) can be severely biased with a concentrated range (exact 0.999873, expected estimate 0.5). | **fixed:** the river path is chosen up front and never truncated: exact enumeration iff `P · RIVER_US_PER_PAIR ≤ budget` (runs to completion, overshoot ≤ 990 evals), else i.i.d. samples drawn `∝ w` with a plain mean, which is unbiased for any weights (§3.3). §1 and §8.2 reworded. New test §6B1 (second bullet) uses exactly this concentrated range with a zero budget across 200 seeds. *(The fixed-cost upgrade rule was replaced in round 2, B1.)* |
 | B2 | major | Finite weights can overflow the cumulative sum (two weights of 1e308 → inf) or underflow when squared. | **fixed:** positive finite weights are rescaled by their maximum before any sum (`w ∈ (0, 1]`, `Σw ≤ 1326`, `Σw² ≥ 1`), so totals, the bisect target, weighted means and `n_eff` stay finite (§3.3). §6B5 tests scale invariance at 1, 1e300 and 1e-300 with finite outputs. |
 | B3 | major | A NaN budget makes the deadline NaN, so the loop runs to `MAX_SAMPLES`, not `MIN_SAMPLES`. | **fixed:** the budget is normalised before the deadline is formed: non-numbers, NaN, 0 and negatives → 0 (→ exactly `MIN_SAMPLES`); `+inf` → no deadline (→ exactly `MAX_SAMPLES`, river exact) (§3.3, edge case 11). §6B7 tests 0, −5, NaN, `"x"` and `+inf` with a fake `_now` and exact sample counts. |
 | B4 | major | `deal_samples` + `equity_vs_samples` cannot model the opponent's pre-discard triple: the discarded card depends on the triple and must be excluded from that sample's runout. | **fixed:** new `deal_triple_samples(board, dead, n, rng, keep_fn)` draws the triple, applies the caller's discard policy to (triple, board) only, and excludes **all three** opponent cards from the runout; a broken `keep_fn` degrades to keeping the two highest ranks (§3.3, §2 interface list, edge case 13). §8.3 corrected: `deal_samples` is for post-discard states only. Tested now (§6B8: exclusion of the discarded card, kept pair ⊂ triple, policy failures, and exactness against a full triple enumeration on a 5-card board), not deferred to F04. |
 | B5 | minor | Format-equivalence tests assert equality on a wall-clock-bounded function, so sample counts can differ. | **fixed:** equality assertions use only deterministic paths: `deal_samples` with a seed, `equity` with `budget_ms = inf` (fixed `MAX_SAMPLES` count; river exact), or a fake clock. The single real-time check asserts timing only (§6B5, §6B7). |
 
-### Round 2: 2026-11-11
+### Round 2: 2026-11-11 (Codex: 2 bugs; both accepted, both fixed in round 3)
+| Bug | Severity | Finding (Codex) | Resolution (Claude) |
+|---|---|---|---|
+| B1 | major | The river's exact path runs to completion based on a fixed 6 µs/pair estimate; at 20 µs/eval a 6 ms budget takes ~18 ms, breaking the per-call deadline. | **fixed:** finite-budget river calls now start with `MIN_SAMPLES` i.i.d. weighted samples (a valid unbiased estimate), which also **measure the per-eval cost on the running machine**; exact enumeration is attempted only if `1.5 × P × measured cost` fits in the remaining time, stays interruptible, and if interrupted is discarded in favour of the i.i.d. estimate; otherwise i.i.d. sampling continues to the deadline. Only `budget_ms = +inf` enumerates unconditionally. The deadline is now formed at function entry, so preparation counts. Stated bound: `elapsed ≤ max(budget, prep + MIN_SAMPLES) + one CHECK_EVERY block` (§3.3, §Budget, §5, §8.2; `RIVER_US_PER_PAIR` replaced by `RIVER_SAFETY`). §6B7 adds a simulated-machine harness (fake `_now` advanced by a fake `_eval`) with fast, slow (B1's exact case) and slows-after-calibration river tests. |
+| B2 | minor | Max-rescaling can change weight ratios in the last bit, so exact equality across scales can fail for a correct implementation. | **fixed:** §6B5 split: exact equality only for the same numbers in different formats (bit-identical after rescaling); across scales, `math.isclose(rel_tol=1e-12)` for river exact equity and `n_eff`, and for Monte Carlo each scale is checked against the exact value within 4 SE, with no cross-scale equality. |
+
+### Round 3: 2026-11-11
 _Awaiting Codex review._
