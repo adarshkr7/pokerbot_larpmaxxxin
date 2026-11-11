@@ -89,4 +89,5 @@ Cost: 3 h compute + 1 h code. Status: todo.
   - Rough split: preflop ≤ 2 ms, flop 25%, discard 15%, turn 25%, river 35%.
 - Stress-test under an artificial slowdown (e.g. multiply measured time by 3, or run with `--jobs` high).
 
-Status: todo. Verify with `scripts/arena.py --jobs 1 --stage 2` (timing is only valid with jobs=1).
+Status: clock, reserve and tiers done in F01 (`bot/timing.py`, constants in `bot/params.py`); budgets are used from
+F02 on. Verify with `scripts/arena.py --jobs 1 --stage 2` (timing is only valid with jobs=1).

@@ -5,7 +5,7 @@ Each feature is planned here, reviewed by Codex until bug-free, and only then im
 
 | # | Feature | Workstream | Strategy items | Status |
 |---|---|---|---|---|
-| F01 | [Engine skeleton: protocol, legality, state, clock, fallbacks](F01_engine_skeleton.md) | W1 | 01 all, 02/E5 | **approved (round 3)** |
+| F01 | [Engine skeleton: protocol, legality, state, clock, fallbacks](F01_engine_skeleton.md) | W1 | 01 all, 02/E5 | **implemented** |
 | F02 | Cards, evaluator, equity (scalar) | W2 | 02/E1, E3 | todo |
 | F03 | Deterministic sparring bots + gauntlet | W7 | 08/T1 | todo |
 | F04 | Discard vs realistic opponents (D1, D5) | W3 | 03/D1, D5 | todo |

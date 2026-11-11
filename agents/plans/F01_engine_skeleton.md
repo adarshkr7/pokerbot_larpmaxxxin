@@ -1,6 +1,6 @@
 # F01: Engine skeleton (protocol loop, legality, state, clock, fallbacks)
 
-**Status:** approved (round 3)
+**Status:** implemented
 **Workstream:** W1 · **Strategy items:** 01/R1–R6, 01/R5b, 02/E5 · **Owner:** Claude (implements) · **Reviewer:** Codex
 
 ## 1. Goal
@@ -323,3 +323,24 @@ use well under 5% (< 7.5 s). `scripts/build.py --check` passes.
 
 ### Round 3: 2026-11-11 (Codex: no bugs)
 Approved. Implementation follows this revision exactly; any design change goes back through review.
+
+### Implementation: 2026-11-11 (branch `feat/F01`)
+No design changes. Small additive helpers, all within the approved design: `cards.parse_valid` (lenient list
+parse used by `state.py`), `log.warn` (always-on line, used for notices), `legal.to_int` also accepts numpy
+integer/real scalars, and a third test-only mode `always_raise` in `tests/patched_bot.py` (the §6B "raise legal,
+bounds missing" row needs a raise *intent*; v0 only calls). One hardening found in self-review: `main()` calls
+`sys.stdin.reconfigure(errors="replace")`, because an invalid UTF-8 byte would otherwise raise inside the
+`for raw in sys.stdin` iterator, outside every guard (`test_invalid_utf8_on_stdin_does_not_crash` runs with strict
+decoding and fails without the fix).
+
+Measured results:
+- `pytest`: 61 passed (~12 s). `scripts/build.py --check`: OK.
+- 6A1: ~600,000 (request, intent) pairs, all accepted by `engine.parse_action`; discards by `parse_discard`.
+- 6A2: chaos bot, 2 seeds x {random, starter} x 400 hands: 0 notices, 0 forfeits. Mutation check: the same chaos
+  bot with `make_legal` disabled gets 90 notices in 40 hands, so the test detects a broken legality layer.
+- 6C1: vs champion v0, 10 seeds x 400 hands: net exactly 0 in every match. 6C2: deterministic `match.log` view
+  identical to v0 vs starter on 5 seeds.
+- 6E: `arena.py --rivals random starter --stage 2 --seeds 4 --jobs 1`: 0 notices, 0 forfeits, `ourTmax` 0.00 s
+  (a 500-hand leg finishes inside the engine's uncharged 5 s start-up window, so the engine's figure is a floor;
+  measured directly: act + discard incl. legality = 8 us per pair, process start-up 84 ms).
+- `promote.py --dry-run`: gauntlet 15.0/24 points (= v0), 0 notices, h2h +0.000 -> not promoted, as planned.
