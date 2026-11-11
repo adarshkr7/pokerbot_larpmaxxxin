@@ -1,0 +1,5 @@
+ROUND 6 REVIEW of `agents/plans/F02_evaluator_equity.md`
+
+B1 [minor] §3.3 support-bound example / §6B9 multi-checkpoint assertion / round 5 resolution — The new telescoping bound is valid, but the example's claimed 26 uncertain checkpoints and endpoint 10432 exclude nonzero probability tails. With Bernoulli(0.5), costs 1 and 3, and budget 20000, cumulative cost at checkpoint n ranges from n to 3n. Both stopping and continuing have positive probability whenever n < 20000 ≤ 3n. Therefore the uncertain checkpoints are 6688 through 19968 in steps of 32: exactly 416. The support-bound endpoint n_last+32 is 20000, giving 0.5*(1/sqrt(6688)-1/sqrt(20000)) = 0.0025784159446, rather than the stated 0.0012. — Compute support endpoints from the possible costs, without dropping tiny-probability events or relying on floating-point probabilities rounded to 0 or 1. Correct the worked bound, the checkpoint-count assertion, and the review-log resolution. The previous finding is otherwise addressed; no estimator redesign is needed.
+
+VERDICT: 1 bug

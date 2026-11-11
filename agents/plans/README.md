@@ -6,7 +6,7 @@ Each feature is planned here, reviewed by Codex until bug-free, and only then im
 | # | Feature | Workstream | Strategy items | Status |
 |---|---|---|---|---|
 | F01 | [Engine skeleton: protocol, legality, state, clock, fallbacks](F01_engine_skeleton.md) | W1 | 01 all, 02/E5 | **implemented** |
-| F02 | [Cards, evaluator, equity (scalar)](F02_evaluator_equity.md) | W2 | 02/E1, E3, E4 (canon3) | **in review (round 6)** |
+| F02 | [Cards, evaluator, equity (scalar)](F02_evaluator_equity.md) | W2 | 02/E1, E3, E4 (canon3) | **in review (round 7)** |
 | F03 | [Deterministic sparring bots + gauntlet](F03_sparring_gauntlet.md) | W7 | 08/T1, T3 | **in review (round 1)** |
 | F04 | Discard vs realistic opponents (D1, D5) | W3 | 03/D1, D5 | todo |
 | F05 | Preflop tiers (heuristic) | W4 | 04/P1, P3 | todo |

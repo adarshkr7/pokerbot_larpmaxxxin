@@ -1,6 +1,6 @@
 # F02: Cards, evaluator, equity (scalar)
 
-**Status:** in review (round 6)
+**Status:** in review (round 7)
 **Workstream:** W2 · **Strategy items:** 02/E1, 02/E3, 02/E4 (`canon3` only) · **Owner:** Claude (implements) · **Reviewer:** Codex
 
 ## 1. Goal
@@ -143,12 +143,14 @@ lie in [0, 1]). The 32 samples after `n_j` are independent of the event `{N > n_
 and, since `E[μ − m_n] = 0`, each term satisfies `|term_j| ≤ 32/(n_j + 32) · E|m_{n_j} − μ| / 2
 ≤ 16σ / ((n_j + 32)·√n_j)` (≤ 0.0104 at 64 samples with σ = 1/2). This **per-term cap** holds for any values and any
 stopping rule. It does **not** bound the total by itself, because several checkpoints can contribute at once (Codex
-round 5, B1: Bernoulli(0.5), costs 1 and 3, B = 20,000 gives bias −2.49e-5. No stop is possible before checkpoint
-~6,688, and around 26 checkpoints are uncertain; the cap at the first of them is only 1.4e-5).
+round 5, B1: Bernoulli(0.5), costs 1 and 3, B = 20,000 gives bias −2.4921e-5. No stop is possible before checkpoint
+6,688, and the decision is uncertain at all 416 checkpoints 6,688–19,968; the cap at the first of them is 1.4557e-5).
 
 *Proven bound (support sum, telescoped).* A term vanishes whenever `P(N > n_j)` is 0 (the indicator is 0) or 1 (then
-it equals `E[μ − m_{n_j}] = 0`). Let `n_first` and `n_last` be the first and last checkpoints at which the
-stop/continue decision is uncertain. Then `|bias| ≤ Σ_{n_first ≤ n_j ≤ n_last} 16σ/((n_j + 32)√n_j)`. Each summand
+it equals `E[μ − m_{n_j}] = 0`). Call checkpoint `n_j < MAX_SAMPLES` **uncertain** if `0 < P(N > n_j) < 1`, as an
+exact statement about which outcomes are *possible*, not a floating-point probability: a tail of 2^-6688 still
+counts. Let `[n_first, n_last]` be **any** interval of checkpoints that contains every uncertain one. Then
+`|bias| ≤ Σ_{n_first ≤ n_j ≤ n_last} 16σ/((n_j + 32)√n_j)`, since the summands are positive. Each summand
 is at most `σ · (1/√n_j − 1/√(n_j + 32))`, which is equivalent to `√(n_j(n_j + 32)) ≤ n_j + 32`. So the sum
 telescopes:
 
@@ -157,10 +159,15 @@ telescopes:
 That is, the bias never exceeds the standard error of a fixed-count mean of `n_first` samples. It is proven for any
 values in [0, 1] and any stopping rule. Two corollaries:
 - Every call has `n_first ≥ MIN_SAMPLES`, so `|bias| ≤ 1/(2·8) = 0.0625`. This holds always, but is weak.
-- If each sample's cost lies in `[c_min, c_max]` and the sampling phase has budget `B'`, no stop is possible before
-  `B'/c_max` samples, and stopping is certain by `B'/c_min`. So `n_first ≥ ⌈B'/c_max⌉` and `n_last ≤ ⌈B'/c_min⌉`
-  (rounded to checkpoints), which gives a much tighter bound when the cost spread is small. Codex's case checks out:
-  0.5 · (1/√6688 − 1/√10432) = 0.0012 ≥ 2.49e-5.
+- **Cost-range corollary.** Let each sample's cost lie in `[c_min, c_max]`, and let `B'` be the time left when
+  sampling starts (on the river, after calibration). At checkpoint `n` the elapsed sampling cost lies in
+  `[n·c_min, n·c_max]`, and the loop continues iff it is `< B'`. So `n` can only be uncertain if
+  `n·c_min < B' ≤ n·c_max`. A valid interval is therefore: `n_first` = the smallest checkpoint with `n·c_max ≥ B'`,
+  and `n_last` = the largest checkpoint below `MAX_SAMPLES` with `n·c_min < B'`. These are computed in exact
+  arithmetic, never from rounded probabilities. For two-point values (Bernoulli, 0 < p < 1), both extremes
+  (`k = 0` and `k = n`) are possible, so this interval is *exactly* the uncertain set. Codex's case: `n_first`
+  = 6,688 (3n ≥ 20,000), `n_last` = 19,968 (n < 20,000), 416 checkpoints, bound 0.5 · (1/√6688 − 1/√20000)
+  = 0.0025784 ≥ 2.4921e-5.
 
 *A deadline rule.* Elapsed time only grows, so `{N > n_j} = {C(n_j) < deadline}`, where `C(n)` is the cumulative
 cost. Only checkpoints whose cumulative cost straddles the budget contribute: one or two at small `n`, and more at
@@ -209,8 +216,10 @@ saving of the enumeration idea without the bias.
 `+inf` stays `+inf`. Then, **at function entry, before range preparation** (so preparation time counts against the
 budget), `deadline = _now() + b / 1000` (`+inf` when `b` is infinite). `_now` (= `time.perf_counter`) and `_eval`
 (= `evaluator.eval7`) are module attributes that `equity.py` calls through, so tests can substitute a fake clock and
-a slow evaluator. The deadline is checked every `CHECK_EVERY` samples (or enumerated pairs). A sampling loop never
-stops before `MIN_SAMPLES` samples. So: `b = 0` → exactly `MIN_SAMPLES` (a panic-tier caller still gets a usable
+a slow evaluator. The deadline is checked every `CHECK_EVERY` samples (or enumerated pairs), and a loop stops at a
+check iff `_now() >= deadline` (so `b = 0` stops at the first check even if the clock has not advanced). A sampling
+loop never stops before `MIN_SAMPLES` samples, so its checkpoints are 64, 96, 128, …, up to `MAX_SAMPLES` = 20,000
+(= 64 + 32 · 623, which is a checkpoint, and sampling always stops there). So: `b = 0` → exactly `MIN_SAMPLES` (a panic-tier caller still gets a usable
 answer for ≈ 0.3 ms); `b = +inf` → exactly `MAX_SAMPLES` on the turn/flop and exact enumeration on the river.
 **Time bound** for every finite-budget call: `elapsed ≤ max(b, prep) + one CHECK_EVERY block + MIN_SAMPLES samples`.
 On the turn and flop, and on the river's no-upgrade path, this tightens to the round 3 form
@@ -353,7 +362,14 @@ the contract and pinned by a test (§6D).
    `engine.best_hand`. Exclusion on the flop is covered by the hygiene checks above.
 9. *Cost-dependent evaluator (Codex round 3, B1):* same harness as 7. The fake `_eval` is memoised over `eval7` so the
    test stays fast. It advances fake time by **1 unit (10 µs) when the evaluated hand is below hero's value and 2
-   units otherwise**, so cost is perfectly correlated with the sample's value, as in Codex's counterexample.
+   units otherwise**, so cost is perfectly correlated with the sample's value, as in Codex's counterexample. Rules:
+   - hero's own evaluations (cards containing `hero2`) cost 0;
+   - the wrapper gets hero's value for the same 5 board cards by calling `eval7` directly, so it does not depend on
+     `equity`'s call order or cache;
+   - fake time counts integer ticks (1 unit = 5 ticks, so the costs 1, 1.2 and 2 are 5, 6 and 10 ticks).
+
+   Every empirical budget below is set **half a tick** off any achievable cumulative cost, so float rounding in
+   `deadline = _now() + b/1000` cannot flip a `>=` comparison. The predictor uses the same budget exactly.
    - **Codex's exact case:** two equally weighted pairs, one losing to hero and one beating hero, budget 96 units.
      Since `P ≤ MIN_SAMPLES`, calibration completes the enumeration, and **every** seed (500 seeds) returns exactly
      0.5. The round 3 design's expectation was 0.4829.
@@ -361,25 +377,34 @@ the contract and pinned by a test (§6D).
      budget where the upgrade does not fit. Asserted: the calibration's elapsed fake time and the upgrade decision
      are identical for every seed (they do not depend on the rng). A budget where the upgrade fits returns exactly
      0.5 for every seed.
-   - **Deadline-stopping bias at the checkpoint transitions (Codex round 4, B1):** the losing-opponent cost stays
-     at 1 unit and the winning-opponent cost is set to `r` units, for r ∈ {1.2, 2}. On the same 400-pair river range
-     (Bernoulli(0.5) values, i.i.d. path), the budget is placed exactly on a transition:
-     `B = calibration + hero cost + n · (1 + r)/2` for n ∈ {64, 160}. The calibration cost is deterministic and is
-     measured by the previous bullet. Case r = 1.2, n = 64 is Codex's B = 70.4. Each configuration runs 3,000 seeds.
-     The test asserts:
-     - the empirical mean is within 4 SE of the **closed-form prediction**. A ~30-line helper in the test,
-       `stopping_bias(c_win, c_lose, p, B)`, evaluates the §3.3 decomposition exactly with `math.comb`. For Codex's
-       case it returns 0.4917211 within 1e-9, and a unit test checks it against a brute-force dynamic program.
-     - |prediction − 0.5| is within the proven bound, which the helper's `support_bound(c_win, c_lose, p, B)` computes
-       over the uncertain checkpoints. The prediction is also checked against the telescoped form
-       `0.5 · (1/√n_first − 1/√(n_last + 32))`.
-   - **Multi-checkpoint case (Codex round 5, B1), analytic only:** `stopping_bias(1, 3, 0.5, 20000)` equals
-     −2.4921495e-5 within 1e-12, and is checked against the brute-force DP too. The test asserts that around 26
-     checkpoints are uncertain, that |bias| exceeds the per-term cap at `n_first`, which documents that the cap alone
-     is not a bound, and that it is within both the support sum and the telescoped bound.
-   - **Turn:** a 3-pair turn range with the same cost rule (hero's own evaluations cost 0) and budgets near the
-     64- and 160-sample transitions. Each sample's cost lies in `[1, r]`, so the cost-range corollary gives `n_first` and `n_last`. The mean over 3,000 seeds is within `4 · SE + 0.5 · (1/√n_first − 1/√(n_last + 32))` of the exact turn equity
-     computed in the test.
+   - **Test helpers** (in `tests/test_equity.py`). Notation: `c1` = cost of a value-1 sample (hero wins), `c0` = cost
+     of a value-0 sample, `p` = P(value 1), `B` = the sampling budget `B'`, all passed as `Fraction`s.
+     - `stopping_mean(c1, c0, p, B)` returns the exact expected estimate of the deadline-stopped mean on the
+       checkpoint grid. It evaluates the §3.3 decomposition. At each checkpoint, the continue condition
+       `k·c1 + (n−k)·c0 < B` is a threshold in `k`, solved exactly with `Fraction`. Binomial probabilities use log-space
+       terms (`math.lgamma`), so `n` up to 20,000 is fine.
+     - `support(c1, c0, B)` returns the exact uncertain checkpoints via the cost-range corollary (integer and `Fraction`
+       arithmetic only). `support_bound` returns the summed per-term caps over them, with σ = 1/2.
+   - **Analytic checks.**
+     - Codex's round 4 case: `stopping_mean(1, 6/5, 1/2, 352/5)` (B = 70.4) = 0.4917211038543361 within 1e-12.
+     - A brute-force dynamic program over (n, k) agrees with `stopping_mean` within 1e-12 on that case and on the
+       four transition configurations below. These are all small `n`; the DP is O(n²), so it is not run at 20,000.
+     - **Multi-checkpoint case (Codex round 5, B1):** `stopping_mean(1, 3, 1/2, 20000) − 1/2` = −2.4921495e-5 within
+       1e-11 (Codex's independent value: −0.00002492149524). `support(1, 3, 20000)` is exactly the 416 checkpoints
+       6,688, 6,720, …, 19,968. |bias| exceeds the per-term cap at 6,688 (1.4557e-5), which documents that the cap
+       alone is not a bound. It is within `support_bound` and within the telescoped
+       `0.5 · (1/√6688 − 1/√20000)` = 0.0025784.
+   - **Deadline-stopping bias at the checkpoint transitions (Codex round 4, B1), empirical:** value-1 samples cost
+     1 unit and value-0 samples cost `r` units, for r ∈ {1.2, 2}. The 400-pair river range gives Bernoulli(0.5) values
+     on the i.i.d. path. The budget is placed on a transition:
+     `b = calibration + n · (1 + r)/2 units + half a tick`, for n ∈ {64, 160}. The calibration cost is deterministic and
+     is measured by the "selection is rng-free" bullet. Each configuration runs 3,000 seeds. The test asserts:
+     - the empirical mean is within 4 SE of `stopping_mean` for the same `B'`;
+     - |`stopping_mean` − 0.5| ≤ `support_bound` ≤ the telescoped form over `support(...)`.
+   - **Turn:** a 3-pair turn range with the same cost rule, and budgets (plus half a tick) near the 64- and
+     160-sample transitions. Each sample costs 1 or `r` units (hero's evaluations are free), so the cost-range
+     corollary gives `[n_first, n_last]`. The mean over 3,000 seeds is within
+     `4 · SE + 0.5 · (1/√n_first − 1/√(n_last + 32))` of the exact turn equity computed in the test.
    - **Scan reproduced:** `scripts/bench_equity.py --bias` prints the §3.3 table (every ratio, p and budget listed
      there). Its output is recorded in the implementation log.
 
@@ -454,7 +479,12 @@ ratio. The ratio only sets how wide the budget window around each checkpoint tra
 ### Round 5: 2026-11-11 (Codex: 1 bug; accepted, fixed in round 6)
 | Bug | Severity | Finding (Codex) | Resolution (Claude) |
 |---|---|---|---|
-| B1 | minor | The per-checkpoint caps do not bound the total, because several transition checkpoints can contribute at once. Counterexample: Bernoulli(0.5), costs 1 and 3, B = 20,000 gives bias −2.492e-5, while no stop is possible before checkpoint 6,688, whose cap is 1.46e-5. This refutes the universal cap and the derived bias/SE and MSE guarantees. Keep the decomposition and the summed bound, present the scan as restricted evidence, and add this case to the analytic checks. | **fixed:** reproduced exactly (−2.4921495e-5; 26 uncertain checkpoints). The unproven claims ("≤ the cap at the first checkpoint", "≤ 17% of SE", "MSE +3%") were removed. §3.3 now proves: (1) terms with `P(N > n_j)` ∈ {0, 1} vanish, so only uncertain checkpoints count; (2) each per-term cap `16σ/((n+32)√n)` is ≤ `σ(1/√n − 1/√(n+32))` (equivalent to `√(n(n+32)) ≤ n+32`), so the support sum telescopes to `\|bias\| ≤ σ(1/√n_first − 1/√(n_last+32)) ≤ σ/√n_first`, for any values in [0, 1] and any stopping rule. A corollary bounds `n_first` and `n_last` from the per-sample cost range (Codex's case: 0.0012 ≥ 2.49e-5). The exact scan is labelled as evidence for its stated model and range only, and its table now sits beside the proven bound. §6B9 adds Codex's case as an analytic check (value, uncertain-checkpoint count, exceeds the per-term cap, within both proven bounds). The transition tests now assert the proven support bound, and the turn tolerance uses the cost-range corollary. §8.5 reworded. |
+| B1 | minor | The per-checkpoint caps do not bound the total, because several transition checkpoints can contribute at once. Counterexample: Bernoulli(0.5), costs 1 and 3, B = 20,000 gives bias −2.492e-5, while no stop is possible before checkpoint 6,688, whose cap is 1.46e-5. This refutes the universal cap and the derived bias/SE and MSE guarantees. Keep the decomposition and the summed bound, present the scan as restricted evidence, and add this case to the analytic checks. | **fixed:** reproduced exactly (−2.4921495e-5; ~~26~~ 416 uncertain checkpoints, *corrected in round 7*: the 26 came from treating float-underflowed tails as impossible). The unproven claims ("≤ the cap at the first checkpoint", "≤ 17% of SE", "MSE +3%") were removed. §3.3 now proves: (1) terms with `P(N > n_j)` ∈ {0, 1} vanish, so only uncertain checkpoints count; (2) each per-term cap `16σ/((n+32)√n)` is ≤ `σ(1/√n − 1/√(n+32))` (equivalent to `√(n(n+32)) ≤ n+32`), so the support sum telescopes to `\|bias\| ≤ σ(1/√n_first − 1/√(n_last+32)) ≤ σ/√n_first`, for any values in [0, 1] and any stopping rule. A corollary bounds `n_first` and `n_last` from the per-sample cost range (Codex's case: ~~0.0012~~ 0.0025784 ≥ 2.49e-5, *corrected in round 7*). The exact scan is labelled as evidence for its stated model and range only, and its table now sits beside the proven bound. §6B9 adds Codex's case as an analytic check (value, uncertain-checkpoint count, exceeds the per-term cap, within both proven bounds; *round 7: the DP cross-check is limited to small n*). The transition tests now assert the proven support bound, and the turn tolerance uses the cost-range corollary. §8.5 reworded. |
 
-### Round 6: 2026-11-11
+### Round 6: 2026-11-11 (Codex: 1 bug; accepted, fixed in round 7)
+| Bug | Severity | Finding (Codex) | Resolution (Claude) |
+|---|---|---|---|
+| B1 | minor | The worked example's "26 uncertain checkpoints" and endpoint 10,432 drop nonzero-probability tails. Costs at checkpoint n range from n to 3n, so every n with n < 20,000 ≤ 3n is uncertain: 6,688–19,968, exactly 416, and the bound is 0.5·(1/√6688 − 1/√20000) = 0.0025784, not 0.0012. Compute the support from the possible costs, not from rounded probabilities, and correct the example, the assertion and the log. | **fixed:** confirmed (416 checkpoints, 0.002578415944623744). §3.3 now defines "uncertain" as an exact possibility statement, and the bound holds for **any** interval containing the uncertain checkpoints. The cost-range corollary gives that interval in exact arithmetic (`n·c_min < B' ≤ n·c_max`, below `MAX_SAMPLES`), and it is exactly the uncertain set for two-point values. The worked example, the per-term paragraph and the round 5 log are corrected (marked). The rest of the B1 surface was reviewed for the same class of error, and three more fixes were made. (1) The test helpers were renamed and split: `stopping_mean` returns the expected estimate (round 6 used one name for both an estimate and a bias), and `support`/`support_bound` use integer/`Fraction` arithmetic only. (2) The brute-force DP cross-check is limited to small n, because round 6 claimed a DP check at n = 20,000, which would be O(n²) and infeasible. (3) The stop comparison is pinned to `_now() >= deadline` with the checkpoint grid 64 + 32j up to `MAX_SAMPLES` (§Budget). The fake clock uses integer ticks, and empirical budgets sit half a tick off any achievable cost, so a float tie cannot flip a stop decision (§6B9). |
+
+### Round 7: 2026-11-11
 _Awaiting Codex review._
