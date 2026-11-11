@@ -1,6 +1,6 @@
 # F02: Cards, evaluator, equity (scalar)
 
-**Status:** in review (round 4)
+**Status:** in review (round 5)
 **Workstream:** W2 · **Strategy items:** 02/E1, 02/E3, 02/E4 (`canon3` only) · **Owner:** Claude (implements) · **Reviewer:** Codex
 
 ## 1. Goal
@@ -132,17 +132,45 @@ step 5 handles the rest, and step 5 is never biased.
 **Bias (all streets).** With a fixed sample count, the i.i.d. and Monte Carlo means are unbiased. Every finite
 budget stops at a wall-clock deadline, though, and if a sample's evaluation cost correlates with its value, the
 stopping point correlates with the running mean. This is a small bias that **is not eliminated** (it would need a
-sample count fixed in advance, and then a hard deadline would be impossible). It is bounded instead. Model: values
-1 and 0 with p = 0.5; checkpoints at 64 and then every 32; budget B in units of the cheaper evaluation. Exact
-dynamic programming over the stopping rule gives:
-- **2× cost ratio, perfectly correlated** (Codex's adversarial case): bias −0.0083 at B = 96 (the worst case,
-  ≈ 64 samples), −0.0015 at B = 200, ≤ −0.0003 at B ≥ 400.
-- **1.2× ratio:** |bias| ≤ 1e-5 at every B.
+sample count fixed in advance, and then a hard deadline would be impossible). It is bounded instead.
 
-A real `eval7` call's cost varies with the opponent's hand category by far less than 2× (measured in §6F). Our
-callers' budgets give hundreds of samples, so the bias is several orders of magnitude below the Monte Carlo standard
-error (~0.016 at 1,000 samples). The plan therefore claims **"no selection bias; deadline-stopping bias ≤ 0.01 even
-for a 2× fully correlated cost"**, not exact unbiasedness. §6B9 checks this bound with a cost-dependent fake evaluator.
+*Decomposition.* Let the checkpoints be `n_0 = 64`, `n_{j+1} = n_j + 32`, let `N` be the checkpoint where sampling
+stops, `m_n` the mean of the first `n` samples, `μ` the true value, and `σ² ≤ 1/4` the per-sample variance (values
+lie in [0, 1]). The 32 samples after `n_j` are independent of the event `{N > n_j}`, which is decided at `n_j`. So:
+
+  `E[m_N] − μ = Σ_j 32/(n_j + 32) · E[1{N > n_j} · (μ − m_{n_j})]`
+
+and each term is at most `32/(n_j + 32) · E|m_{n_j} − μ| / 2 ≤ 32 / ((n_j + 32) · 4√n_j)`. This **per-checkpoint
+cap** holds for any values and any stopping rule. It is 0.0104 at 64 samples, 0.0064 at 96, 0.0033 at 160, 0.0013
+at 320, 0.00025 at 1,000, and it falls like `n^(−3/2)`. Summed over every checkpoint up to `MAX_SAMPLES`, it gives a
+distribution-free ceiling of 0.057. That ceiling only applies if an adversary could make the stop/continue decision
+uncertain at every checkpoint at once.
+
+*A deadline rule.* Elapsed time only grows, so `{N > n_j} = {C(n_j) < deadline}`, where `C(n)` is the cumulative
+cost. Only checkpoints whose cumulative cost straddles the budget contribute. A block costs about 32 × the mean cost,
+much more than the spread of `C(n)`, so for a given budget one or two checkpoints dominate.
+
+*Exact computation (corrects round 3, Codex round 4 B1).* The closed form above was evaluated exactly with Binomial
+probabilities and matches a brute-force dynamic program, including Codex's case (1.2×, B = 70.4 → −0.0082789). The
+scan covered:
+- values Bernoulli(p), p ∈ {0.1, 0.3, 0.5};
+- cost ratios 1.05, 1.1, 1.2, 1.5, 2 and 3, with the win either cheaper or dearer;
+- every budget on a 0.05–0.1-unit grid, from 0 up to 1,400 samples (4,000 samples for ratios 1.2, 2 and 3).
+
+| budgets that give at least … samples | 64 | 96 | 160 | 320 | 640 | 1,000 | 2,000 |
+|---|---|---|---|---|---|---|---|
+| sup \|bias\| (any ratio scanned, p = 0.5) | 0.0083 | 0.0051 | 0.0026 | 0.0010 | 0.0004 | 0.0002 | 0.0001 |
+| per-checkpoint cap | 0.0104 | 0.0064 | 0.0033 | 0.0013 | 0.0005 | 0.00025 | 0.0001 |
+
+The **cost ratio does not change the worst case**; my round 3 claim that a 1.2× ratio is negligible at every budget
+was wrong. The ratio only sets how narrow the budget window is in which the worst case occurs, which is near
+`n × mean cost`. For p = 0.3 and p = 0.1 the worst case is lower (0.0076 and 0.0050).
+
+*Claim.* No selection bias. For a deadline-stopped mean whose first checkpoint is at `n` samples, |bias| is at most
+the per-checkpoint cap at `n` (≤ 0.0104 overall). The exact scan above confirms ≤ 0.0083 over the stated range. The
+bias is always a small fraction of the Monte Carlo standard error at the same sample count: the ratio is at most
+`≈ 16/(n + 32)`, which is 17% at 64 samples, 8% at 160 and 1.6% at 1,000, so the mean squared error grows by ≤ 3%.
+§6B9 checks it with a cost-dependent fake evaluator, at budgets placed on the checkpoint transitions.
 
 **Turn and flop (`len(board) in (3, 4)`): Monte Carlo, sampling the range.** Each sample draws the opponent pair
 `∝ w` from `cum`, then the `5 − len(board)` missing board cards uniformly from the cards not in `X` and not in
@@ -312,9 +340,21 @@ the contract and pinned by a test (§6D).
      budget where the upgrade does not fit. Asserted: the calibration's elapsed fake time and the upgrade decision
      are identical for every seed (they do not depend on the rng). A budget where the upgrade fits returns exactly
      0.5 for every seed.
-   - **Deadline-stopping bias bound:** the same 400-pair range at budgets of 96, 200 and 400 units (i.i.d. path),
-     2,000 seeds each. The mean estimate is within `4 · SE + 0.01` of 0.5, the §3.3 *Bias* bound. Same for a turn
-     range against its exact value (computed in the test).
+   - **Deadline-stopping bias at the checkpoint transitions (Codex round 4, B1):** the losing-opponent cost stays
+     at 1 unit and the winning-opponent cost is set to `r` units, for r ∈ {1.2, 2}. On the same 400-pair river range
+     (Bernoulli(0.5) values, i.i.d. path), the budget is placed exactly on a transition:
+     `B = calibration + hero cost + n · (1 + r)/2` for n ∈ {64, 160}. The calibration cost is deterministic and is
+     measured by the previous bullet. Case r = 1.2, n = 64 is Codex's B = 70.4. Each configuration runs 3,000 seeds.
+     The test asserts:
+     - the empirical mean is within 4 SE of the **closed-form prediction**. A ~30-line helper in the test,
+       `stopping_bias(c_win, c_lose, p, B)`, evaluates the §3.3 decomposition exactly with `math.comb`. For Codex's
+       case it returns 0.4917211 within 1e-9, and a unit test checks it against a brute-force dynamic program.
+     - |prediction − 0.5| is at most the per-checkpoint cap at that `n` (0.0104 or 0.0033).
+   - **Turn:** a 3-pair turn range with the same cost rule (hero's own evaluations cost 0) and budgets near the
+     64- and 160-sample transitions. The mean over 3,000 seeds is within `4 · SE + cap(n)` of the exact turn equity
+     computed in the test.
+   - **Scan reproduced:** `scripts/bench_equity.py --bias` prints the §3.3 table (every ratio, p and budget listed
+     there). Its output is recorded in the implementation log.
 
 **C. Cards.** `pair_index` is a bijection onto `0..1325` and `PAIRS` is its inverse; `deck_without(dead_mask(x))`
 excludes exactly `x`.
@@ -330,8 +370,8 @@ imports the new modules yet, but this proves it).
 **F. Benchmarks (recorded in the review log, `scripts/bench_equity.py`).** `eval7` evals/s on random 7-card hands
 (target ≥ 250k locally); `equity` samples/ms on flop, turn and river (river: ms per full enumeration); import time.
 **Cost/value correlation:** the mean `eval7` time for opponent hands that beat hero vs hands that lose, over random
-rivers, and the spread of cost by hand category. This is the input to the §3.3 *Bias* model. If the ratio exceeds
-1.5, the record says so and the bias bound is recomputed for the measured ratio before F04 relies on it.
+rivers, and the spread of cost by hand category. This is informational: the §3.3 bound does not depend on the
+ratio. The ratio only sets how wide the budget window around each checkpoint transition is.
 
 ## 7. Acceptance criteria
 - [ ] §6A–D pass; `pytest` green; `scripts/build.py --check` passes.
@@ -353,9 +393,10 @@ rivers, and the spread of cost by hand category. This is the input to the §3.3 
 4. **`eval_batch` deferred** to F08; scalar speed (~300k evals/s ≈ 200 samples/ms) supports ~4,000 samples in a
    20 ms decision, ±0.8 points standard error.
 5. **Deadline-stopping bias is accepted, not eliminated** (§3.3 *Bias*). Removing it would need a sample count fixed
-   in advance, which cannot coexist with a hard deadline on an unpredictable machine. The bound (≤ 0.0083 in the
-   worst adversarial case, ≤ 1e-5 at a 1.2× cost ratio) is far below Monte Carlo noise, and it is tested (§6B9)
-   and measured (§6F).
+   in advance, which cannot coexist with a hard deadline on an unpredictable machine. The bound does not depend on
+   the cost ratio: ≤ 0.0104 analytically and 0.0083 in the exact scan, both at the 64-sample checkpoint, falling like
+   `n^(−3/2)`. It is ≤ 17% of the Monte Carlo standard error at any sample count. It is tested (§6B9) and the real
+   cost/value correlation is measured (§6F).
 
 ## Review log
 ### Round 1: 2026-11-11 (Codex: 5 bugs; all accepted, all fixed in round 2)
@@ -376,7 +417,12 @@ rivers, and the spread of cost by hand category. This is the input to the §3.3 
 ### Round 3: 2026-11-11 (Codex: 1 bug; accepted, fixed in round 4)
 | Bug | Severity | Finding (Codex) | Resolution (Claude) |
 |---|---|---|---|
-| B1 | major | The phase-1 samples both supply the fallback estimate and measure the cost that decides whether to replace it with exact equity. If evaluation cost depends on the hand, this selection correlates with the sample values. Codex's counterexample (pairs worth 1 and 0 costing 1 and 2 units, budget 96) gives an expected 0.4829 against a true 0.5. A mean stopped by outcome-dependent elapsed time also needs treatment. | **fixed:** (1) *Selection:* calibration now runs on the first `min(MIN_SAMPLES, P)` pairs of the deterministic enumeration, which consumes no randomness. The exact-vs-i.i.d. choice therefore depends only on the inputs and machine timing, never on a returned sample. The prefix counts towards the enumeration if the upgrade goes ahead. An interrupted calibration or upgrade falls back to exactly `MIN_SAMPLES` fresh i.i.d. samples (fixed count, so unbiased). `b = 0` skips calibration (§3.3 steps 1–6). The time bound becomes `max(b, prep) + one block + MIN_SAMPLES samples` (the extra term applies only to the river fallback) (§Budget, §5). (2) *Deadline stopping:* adopted as an approximate estimator with a quantified bound rather than claiming unbiasedness (§1, §3.3 *Bias*, §8.5). Exact dynamic programming over the stopping rule: worst case −0.0083 for a 2× perfectly correlated cost at a 96-unit budget, ≤ 0.0003 at ≥ 400 units, ≤ 1e-5 for a 1.2× ratio. (3) *Tests:* new §6B9 uses a cost-dependent fake evaluator. Codex's exact case now returns exactly 0.5 on every seed; the test asserts that the calibration time and upgrade decision are identical across seeds; and the deadline-stopping bias stays within `4·SE + 0.01` at 96, 200 and 400 units on the river and turn. §6B7's river cases were updated for the new calibration; two cases were added (deadline during calibration, `P ≤ MIN_SAMPLES`). §6F measures the real `eval7` cost/value correlation. |
+| B1 | major | The phase-1 samples both supply the fallback estimate and measure the cost that decides whether to replace it with exact equity. If evaluation cost depends on the hand, this selection correlates with the sample values. Codex's counterexample (pairs worth 1 and 0 costing 1 and 2 units, budget 96) gives an expected 0.4829 against a true 0.5. A mean stopped by outcome-dependent elapsed time also needs treatment. | **fixed:** (1) *Selection:* calibration now runs on the first `min(MIN_SAMPLES, P)` pairs of the deterministic enumeration, which consumes no randomness. The exact-vs-i.i.d. choice therefore depends only on the inputs and machine timing, never on a returned sample. The prefix counts towards the enumeration if the upgrade goes ahead. An interrupted calibration or upgrade falls back to exactly `MIN_SAMPLES` fresh i.i.d. samples (fixed count, so unbiased). `b = 0` skips calibration (§3.3 steps 1–6). The time bound becomes `max(b, prep) + one block + MIN_SAMPLES samples` (the extra term applies only to the river fallback) (§Budget, §5). (2) *Deadline stopping:* adopted as an approximate estimator with a quantified bound rather than claiming unbiasedness (§1, §3.3 *Bias*, §8.5). Exact dynamic programming over the stopping rule: worst case −0.0083 for a 2× perfectly correlated cost at a 96-unit budget, ≤ 0.0003 at ≥ 400 units, ≤ 1e-5 for a 1.2× ratio. *(The 1.2× claim was wrong: it came from testing a few budgets off the checkpoint transitions. It is corrected in round 5; see round 4, B1.)* (3) *Tests:* new §6B9 uses a cost-dependent fake evaluator. Codex's exact case now returns exactly 0.5 on every seed; the test asserts that the calibration time and upgrade decision are identical across seeds; and the deadline-stopping bias stays within `4·SE + 0.01` at 96, 200 and 400 units on the river and turn. §6B7's river cases were updated for the new calibration; two cases were added (deadline during calibration, `P ≤ MIN_SAMPLES`). §6F measures the real `eval7` cost/value correlation. |
 
-### Round 4: 2026-11-11
+### Round 4: 2026-11-11 (Codex: 1 bug; accepted, fixed in round 5)
+| Bug | Severity | Finding (Codex) | Resolution (Claude) |
+|---|---|---|---|
+| B1 | minor | The claim "1.2× ratio: \|bias\| ≤ 1e-5 at every B" is false. With costs 1 and 1.2 and B = 70.4, the 64-sample checkpoint splits K at its mean, and the expected result is 0.4917211 (bias −0.0082789); B = 70 gives −0.00686. Correct the bound, add budgets near the checkpoint transitions to the exact calculation and the tests, and state the verified range. (This stays within the 0.01 allowance, so no redesign is needed.) The selection-bias fix was confirmed. | **fixed:** my round 3 numbers came from a handful of budgets that missed the transitions. §3.3 *Bias* now has: (1) an exact decomposition `E[m_N] − μ = Σ_j 32/(n_j+32) · E[1{N>n_j}(μ − m_{n_j})]` and a **per-checkpoint cap** `32/((n_j+32)·4√n_j)` that holds for any values and any stopping rule (0.0104 at 64 samples, 0.0033 at 160, 0.00025 at 1,000); (2) the observation that a deadline rule makes `{N > n_j}` = `{C(n_j) < B}`, so only transition checkpoints contribute; (3) a closed-form scan, validated against a brute-force DP and reproducing Codex's −0.0082789. It covers p ∈ {0.1, 0.3, 0.5}, ratios 1.05–3 in both directions, and every budget on a fine grid up to 1,400–4,000 samples. The sup is 0.0083 at the 64-sample transition **for every ratio**: the ratio only narrows the budget window. A table gives the sup by minimum sample count. The claim is now "≤ the cap at the first checkpoint, ≤ 17% of the standard error at any sample count" (§3.3, §8.5). §6B9 places budgets exactly on the 64- and 160-sample transitions for ratios 1.2 (including Codex's B = 70.4) and 2, and checks the empirical mean against an in-test closed-form predictor (itself checked against a DP) and the cap. `bench_equity.py --bias` reproduces the scan, and §6F's ratio measurement is now informational. The round 3 entry is annotated. |
+
+### Round 5: 2026-11-11
 _Awaiting Codex review._
