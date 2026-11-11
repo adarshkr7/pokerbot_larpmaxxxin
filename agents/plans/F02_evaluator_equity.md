@@ -1,13 +1,14 @@
 # F02: Cards, evaluator, equity (scalar)
 
-**Status:** in review (round 1)
+**Status:** in review (round 2)
 **Workstream:** W2 · **Strategy items:** 02/E1, 02/E3, 02/E4 (`canon3` only) · **Owner:** Claude (implements) · **Reviewer:** Codex
 
 ## 1. Goal
 A pure-Python library that later features (F04 discard, F05/F06 betting) call for hand strength and equity:
 `eval7` orders every 5–7-card hand **exactly as the engine's `best_hand` does** at ≥ 250k evals/s, and `equity`
-returns a budget-bounded estimate of win + tie/2 against a weighted opponent range that is **unbiased** (exact on the
-river when the budget allows) and agrees with exact enumeration within 4 standard errors. **No bot behaviour change.**
+returns a budget-bounded estimate of win + tie/2 against a weighted opponent range that is **unbiased** (exact
+enumeration on the river when the budget allows it, otherwise an i.i.d. sample drawn in proportion to the weights)
+and agrees with exact enumeration within 4 standard errors. **No bot behaviour change.**
 
 ## 2. Scope
 **In:** `bot/cards.py` (additions), `bot/evaluator.py` (`eval7`), `bot/equity.py` (`equity`, sampling helpers,
@@ -22,9 +23,10 @@ Nothing in `brain.py` or `placeholder.py` changes, so bot behaviour is identical
   (1,326 entries), `dead_mask(cards) -> bytearray`.
 - `evaluator.py`: `eval7` as in the contract. `eval_batch` stays in the contract but is **not** implemented until
   F08 (the module does not define it before then, so a premature caller fails at import time in tests, not at runtime).
-- `equity.py`: `equity(...)` and `canon3(...)` as in the contract, plus two new functions for common random
-  numbers: `deal_samples(board, opp_weights, dead, n, rng) -> list[tuple]` and
-  `equity_vs_samples(hero2, board, samples) -> float`.
+- `equity.py`: `equity(...)` and `canon3(...)` as in the contract, plus three new functions for common random
+  numbers: `deal_samples(board, opp_weights, dead, n, rng) -> list[tuple]` (post-discard: the opponent holds 2),
+  `deal_triple_samples(board, dead, n, rng, keep_fn) -> list[tuple]` (pre-discard: the opponent holds 3 and
+  discards one) and `equity_vs_samples(hero2, board, samples) -> float`.
 - `opp_weights` format is pinned down (it was "dict or array"): `None` (uniform), a sequence of 1,326 numbers
   indexed by `pair_index`, or a `dict` `{(a, b): w}` with `a < b`.
 
@@ -74,20 +76,30 @@ original hole cards, the board and the opponent's exposed discard). `opp_weights
 **Excluded cards** `X = dead ∪ hero2 ∪ board` (the union is taken defensively, so a caller that forgets to mark
 something dead still gets a consistent deal). The opponent's pair and the runout never contain a card of `X`.
 
-**Range preparation** `_range(opp_weights, X) -> (pairs, cum, total)`: every pair `(a, b)` with neither card in `X`,
-weight `w = float(weight)`; non-finite or negative weights count as 0; pairs with `w = 0` are dropped. If nothing is
-left (all weights 0 or all pairs blocked), fall back to **uniform over the valid pairs** and log a warning once. If no
-valid pair exists at all (impossible with ≤ 10 excluded cards), `equity` returns `(0.5, 0.0)`. `cum` is the running
-sum for weighted sampling (`bisect` on `rng.random() * total`).
+**Range preparation** `_range(opp_weights, X) -> (pairs, w, cum, total)`: every pair `(a, b)` with neither card in
+`X`, raw weight `float(weight)`; non-finite or negative weights count as 0; pairs with weight 0 are dropped. The kept
+weights are then **rescaled by their maximum** (`w_i = raw_i / max raw`, so `w ∈ (0, 1]` and the largest is exactly
+1). Because there are ≤ 1,326 pairs, `total = Σw ≤ 1326` and `Σw² ≤ 1326` can neither overflow nor be 0, whatever
+the input scale (1e308 or 1e-300). Relative weights below ~1e-154 may square to 0; their contribution is negligible
+and `Σw² ≥ 1` from the maximum, so `n_eff` stays finite. If nothing is left (all weights 0 or all pairs blocked), fall
+back to **uniform over the valid pairs** and log a warning once. If no valid pair exists at all (impossible with ≤ 10
+excluded cards), `equity` returns `(0.5, 0.0)`. `cum` is the running sum for weighted sampling (`bisect` on
+`rng.random() * total`).
 
 **Showdown value** `v(hero, opp) = 1` if `hero > opp`, `0.5` if equal, else `0`, from `eval7` on the full 7 cards.
 
-**River (`len(board) == 5`): exact weighted enumeration.** Hero's value is evaluated once. The valid pairs (≤ 903
-in a real hand: 52 − 3 − 5 − 1 = 43 cards) are visited in a random order (`rng.shuffle` of the index list), and the
-estimate is `Σ w·v / Σ w` over the pairs visited. If the budget runs out first (checked every `CHECK_EVERY` pairs,
-never before `MIN_SAMPLES` pairs), the result is that weighted average over a uniformly random subset: still unbiased
-for uniform weights and consistent otherwise. Typical full cost: 903 evals ≈ 3–4 ms. `n_eff = (Σw)² / Σw²` over the
-visited pairs (= the count for a uniform range).
+**River (`len(board) == 5`): exact enumeration if affordable, else weighted i.i.d. sampling.** Hero's value is
+evaluated once. Let `P` be the number of valid pairs (≤ 903 in a real hand: 52 − 3 − 5 − 1 = 43 cards).
+- **Decided up front, never truncated:** exact iff `P · RIVER_US_PER_PAIR ≤ budget_ms · 1000` (budget normalised as
+  below; `RIVER_US_PER_PAIR = 6.0`, conservative against the ~3.5 µs measured locally). Exact enumeration always runs
+  to completion, so its result is exactly `Σ w·v / Σ w`, and `n_eff = (Σw)² / Σw²`. Its overshoot, if the estimate is
+  wrong, is bounded by `P ≤ 990` evals (≈ 4 ms locally).
+- **Otherwise:** i.i.d. samples of the pair drawn `∝ w` (with replacement, from `cum`), estimate = the **plain mean**
+  of `v`, which is unbiased for any weights (`E[v] = Σ w·v / Σ w`); `n_eff = n`; the usual `MIN_SAMPLES` /
+  `CHECK_EVERY` / deadline / `MAX_SAMPLES` rules apply.
+- A partial enumeration (a weighted average over a uniformly random subset) is never returned: with concentrated
+  weights it is badly biased (Codex round 1, B1: one winning pair of weight 1e6 among 127 losing pairs of weight 1,
+  exact 0.999873, a 64-pair subset averages 0.5).
 
 **Turn and flop (`len(board) in (3, 4)`): Monte Carlo, sampling the range.** Each sample draws the opponent pair
 `∝ w` from `cum`, then the `5 − len(board)` missing board cards uniformly from the cards not in `X` and not in
@@ -101,16 +113,32 @@ and for a fixed number of evals, independent joint samples of (pair, river) have
 rivers for fewer pairs (the per-pair variance is multiplied by ~44 evals per pair). The hero cache gives the main
 saving of the enumeration idea without the bias.
 
-**Budget.** `deadline = perf_counter() + budget_ms / 1000`, checked every `CHECK_EVERY` samples. At least
-`MIN_SAMPLES` samples are always taken (even with `budget_ms <= 0`, so a panic-tier caller still gets a usable
-answer for ≈ 0.3 ms), and at most `MAX_SAMPLES`. Overshoot is at most `CHECK_EVERY` samples (≈ 0.2 ms).
+**Budget.** First normalise: `b = budget_ms` if it is a real number (not bool), else 0; NaN, 0 and negatives → 0;
+`+inf` stays `+inf`. Then `deadline = _now() + b / 1000` (`+inf` when `b` is infinite; `_now` is a module attribute,
+`time.perf_counter`, so tests can substitute a fake clock as in `timing.py`). The deadline is checked every
+`CHECK_EVERY` samples, never before `MIN_SAMPLES` samples. So: `b = 0` → exactly `MIN_SAMPLES` (a panic-tier caller
+still gets a usable answer for ≈ 0.3 ms); `b = +inf` → exactly `MAX_SAMPLES` (river: exact enumeration). Overshoot is
+at most `CHECK_EVERY` samples (≈ 0.2 ms).
 
-**Common random numbers (for F04's keep comparison).**
-- `deal_samples(board, opp_weights, dead, n, rng)`: `n` samples `(opp_pair, runout)` drawn exactly as above, with
-  `X = dead ∪ board` (no hero cards: for our own discard, `dead` already holds all 3 of our hole cards).
-- `equity_vs_samples(hero2, board, samples)`: the mean showdown value of `hero2` over those samples (runout cache as
-  above). Calling it for each of our 3 candidate keeps on the same samples gives low-noise *differences*.
-- No budget inside: the caller sizes `n` (e.g. from a timed first batch). Returns 0.5 for an empty sample list.
+**Common random numbers.** A sample is a tuple `(opp_pair, runout)`: the opponent's 2 final hole cards and the
+`5 − len(board)` missing board cards.
+- `deal_samples(board, opp_weights, dead, n, rng)` — **post-discard states only** (the opponent already holds 2 and
+  their discard is known and in `dead`): `n` samples drawn exactly as above, with `X = dead ∪ board`.
+- `deal_triple_samples(board, dead, n, rng, keep_fn)` — **pre-discard states** (our discard decision on the flop, and
+  flop betting before the discard): the opponent still holds 3 cards and discards one simultaneously with us. A
+  marginal pair weighting cannot represent this, because the discarded third card depends on the triple and must be
+  excluded from that sample's runout. Each sample: draw the opponent triple uniformly from the cards not in
+  `X = dead ∪ board` (`rng.sample` of 3), call `keep_fn(triple, board) -> pair` (F04 supplies the opponent discard
+  policy; it sees only the triple and the public board), then draw the runout from the cards not in `X` and **not in
+  the triple** (all three opponent cards are excluded, the discarded one included). If `keep_fn` raises or returns
+  something that is not 2 distinct cards of the triple, that sample keeps the two highest-rank cards (the inverse of
+  the engine's default discard) — so a broken policy degrades, never crashes. Non-uniform triple priors are F10's job.
+- `equity_vs_samples(hero2, board, samples)`: the mean showdown value of `hero2` over the samples (runout cache as
+  above), whichever generator produced them. Calling it for each of our 3 candidate keeps on the same samples gives
+  low-noise *differences*. Contract: no sample card overlaps `hero2` or `board` (both generators guarantee it when our
+  hole cards are in `dead`).
+- No budget inside these three: the caller sizes `n` (e.g. from a timed first batch). `equity_vs_samples` returns 0.5
+  for an empty sample list.
 
 **`equity(hero2, board, opp_weights, dead, budget_ms, rng) -> (eq, n_eff)`** dispatches to the river or Monte Carlo
 path. `eq` is in `[0, 1]`.
@@ -128,7 +156,7 @@ Total 1,755. The index is the position of the key in the **sorted** list of all 
 the contract and pinned by a test (§6D).
 
 ### 3.5 `params.py` (`# --- W2 ---`)
-`MIN_SAMPLES = 64`, `MAX_SAMPLES = 20000`, `CHECK_EVERY = 32`.
+`MIN_SAMPLES = 64`, `MAX_SAMPLES = 20000`, `CHECK_EVERY = 32`, `RIVER_US_PER_PAIR = 6.0`.
 
 ## 4. Edge cases
 1. Wheel (`A2345`) and steel wheel (straight flush to 5): high card 3; `A2345` loses to `23456`.
@@ -141,10 +169,13 @@ the contract and pinned by a test (§6D).
 7. Straight on board vs flush in hand, flush vs full house: category order.
 8. 5- and 6-card inputs (flop and turn showdown values for F04).
 9. Opponent range entirely blocked by dead cards or all-zero / NaN / negative weights → uniform fallback.
+   Extreme but finite scales (1e308, 1e-300) → rescaled by the maximum, finite results identical to ordinary scales.
 10. Duplicate or out-of-range ids passed by a caller → not validated in `eval7` (hot path); `equity` builds its
     excluded set itself and never deals a card twice. Documented as a caller contract.
-11. `budget_ms` 0, negative or NaN → `MIN_SAMPLES`; huge → capped by `MAX_SAMPLES` (and by exhaustion on the river).
+11. `budget_ms` 0, negative, NaN or non-numeric → normalised to 0 → `MIN_SAMPLES` (river: i.i.d. path); `+inf` →
+    `MAX_SAMPLES` (river: exact enumeration).
 12. `rng=None` → module default generator; tests always pass a seeded `random.Random`.
+13. `keep_fn` raising or returning a bad pair → that sample keeps the two highest-rank cards of the triple.
 
 ## 5. Failure handling and time
 - All functions are pure; nothing touches stdout or files. They can raise only on caller contract violations (e.g.
@@ -166,19 +197,36 @@ the contract and pinned by a test (§6D).
 
 **B. Equity: Monte Carlo vs exact (`tests/test_equity.py`).**
 1. *River exact vs an independent brute force:* the brute force iterates over all valid pairs with
-   `engine.best_hand` (different evaluator, different loop). Uniform and non-uniform weights; equal within 1e-12.
+   `engine.best_hand` (different evaluator, different loop). Uniform and non-uniform weights, `budget_ms = inf`
+   (exact path); equal within 1e-12.
+   - *River truncated budget, concentrated range (B1's case):* 128 positive-weight pairs (all others weight 0), one
+   winning pair of weight 1e6 and 127 losing pairs of weight 1 (exact 0.999873); with `budget_ms = 0` (i.i.d. path, `MIN_SAMPLES`), the mean of the
+   estimate over 200 seeds is within 0.005 of exact; and a uniform-range river with `budget_ms = 0` averages within
+   4 SE of the exact value over 200 seeds.
 2. *Turn MC vs exact:* exact = full enumeration of (pair, river) with weights, computed in the test. MC with a large
    budget (≥ 8,000 samples): `|mc − exact| ≤ 4 · sqrt(p(1−p)/n)`. Uniform range and a 3-pair range.
 3. *Flop MC vs exact on a small range:* opponent range of 3 pairs, exact = all pairs × all C(45, 2) runouts. Same
    4-SE tolerance.
 4. *Sampling hygiene:* over 20,000 `deal_samples`, no dealt card is in `dead ∪ board`, no card repeats within a
    sample, and pair frequencies match the weights (chi-square, p > 0.001, seeded).
-5. *Weights formats:* `None`, a 1,326 list, a dict, and a numpy array give identical results with the same seed;
-   NaN / negative / all-zero / fully blocked ranges fall back to uniform.
+5. *Weights formats and scale* (deterministic only: no wall-clock dependence): `None`, a 1,326 list, a dict and a
+   numpy array give identical `deal_samples` with the same seed, and identical `equity` with `budget_ms = inf`
+   (fixed `MAX_SAMPLES` count; river: exact). The same range multiplied by 1e300, by 1e-300 and by 1 gives identical
+   results, all finite, `n_eff` finite. NaN / negative / all-zero / fully blocked ranges fall back to uniform.
 6. *CRN:* `equity_vs_samples` on the same samples is deterministic, and for a dominated keep (e.g. 72o vs AA on
    a low board) the difference has the expected sign.
-7. *Budget:* `budget_ms = 0` → exactly `MIN_SAMPLES` on the turn; a 5 ms budget returns within 5 ms +
-   2 ms slack and `n ≥ MIN_SAMPLES`; `MAX_SAMPLES` caps a huge budget; river with a huge budget visits every pair.
+7. *Budget with a fake clock* (`equity._now` replaced by a counter that advances a fixed step per call, so sample
+   counts are exact): `budget_ms` 0, −5, NaN, `"x"` → exactly `MIN_SAMPLES` (turn, flop, and river i.i.d. path);
+   `+inf` → exactly `MAX_SAMPLES` (turn, flop) and full enumeration (river); a finite budget stops at the first
+   `CHECK_EVERY` boundary past the deadline. Separately, **one real-time check**: a 5 ms budget returns within
+   5 ms + 2 ms slack (timing only, no equality assertions).
+8. *Triple samples:* over 5,000 `deal_triple_samples` with a recording `keep_fn`: the kept pair is 2 distinct cards
+   of the triple the policy was shown; **no runout card is any of the 3 opponent cards** (the discarded one
+   included), nor in `dead ∪ board`; a `keep_fn` that raises or returns `(c, c)` / a card outside the triple yields
+   the two highest-rank cards. Exactness: on a 5-card board (empty runout, so the test can enumerate all ~13,000 opponent
+   triples exactly), `equity_vs_samples` over 20,000 triple samples with a deterministic `keep_fn` (keep the two
+   highest ranks) agrees within 4 SE with the exact average over all triples, computed in the test with
+   `engine.best_hand`. Exclusion on the flop is covered by the hygiene checks above.
 
 **C. Cards.** `pair_index` is a bijection onto `0..1325` and `PAIRS` is its inverse; `deck_without(dead_mask(x))`
 excludes exactly `x`.
@@ -203,14 +251,23 @@ imports the new modules yet, but this proves it).
 ## 8. Risks and open questions (for the reviewer)
 1. **Monte Carlo vs exact on the turn.** Chosen: joint sampling with a hero cache (unbiased, best variance per eval).
    The alternative (enumerate rivers for the top-K pairs) is biased by the truncation.
-2. **River partial enumeration** with a non-uniform range: the weighted average over a random subset is consistent
-   but slightly biased (ratio estimator) for small subsets. Acceptable: a full river enumeration costs ~3–4 ms,
-   so partial results occur only in the throttle/panic tiers.
-3. **3-card hero equity** (flop betting before the discard) is not in F02. F04/F06 will compose it from
-   `deal_samples` + `equity_vs_samples` (max over the 3 keeps on common samples), so no new primitive is needed.
+2. **River: exact or i.i.d., decided up front** from a fixed cost constant (`RIVER_US_PER_PAIR`). On a slower judge
+   the exact path may overshoot its budget by at most one enumeration (≤ 990 evals); the clock's reserve covers it.
+3. **3-card hero equity** (flop betting before the discard) is not in F02. F04/F06 compose it from
+   `deal_triple_samples` (the opponent's discard modelled per triple, all three of their cards excluded from the
+   runout) + `equity_vs_samples` (max over our 3 keeps on common samples).
 4. **`eval_batch` deferred** to F08; scalar speed (~300k evals/s ≈ 200 samples/ms) supports ~4,000 samples in a
    20 ms decision, ±0.8 points standard error.
 
 ## Review log
-### Round 1: 2026-11-11
+### Round 1: 2026-11-11 (Codex: 5 bugs; all accepted, all fixed in round 2)
+| Bug | Severity | Finding (Codex) | Resolution (Claude) |
+|---|---|---|---|
+| B1 | major | A budget-truncated river enumeration (weighted average over a uniform random subset) can be severely biased with a concentrated range (exact 0.999873, expected estimate 0.5). | **fixed:** the river path is chosen up front and never truncated: exact enumeration iff `P · RIVER_US_PER_PAIR ≤ budget` (runs to completion, overshoot ≤ 990 evals), else i.i.d. samples drawn `∝ w` with a plain mean, which is unbiased for any weights (§3.3). §1 and §8.2 reworded. New test §6B1 (second bullet) uses exactly this concentrated range with a zero budget across 200 seeds. |
+| B2 | major | Finite weights can overflow the cumulative sum (two weights of 1e308 → inf) or underflow when squared. | **fixed:** positive finite weights are rescaled by their maximum before any sum (`w ∈ (0, 1]`, `Σw ≤ 1326`, `Σw² ≥ 1`), so totals, the bisect target, weighted means and `n_eff` stay finite (§3.3). §6B5 tests scale invariance at 1, 1e300 and 1e-300 with finite outputs. |
+| B3 | major | A NaN budget makes the deadline NaN, so the loop runs to `MAX_SAMPLES`, not `MIN_SAMPLES`. | **fixed:** the budget is normalised before the deadline is formed: non-numbers, NaN, 0 and negatives → 0 (→ exactly `MIN_SAMPLES`); `+inf` → no deadline (→ exactly `MAX_SAMPLES`, river exact) (§3.3, edge case 11). §6B7 tests 0, −5, NaN, `"x"` and `+inf` with a fake `_now` and exact sample counts. |
+| B4 | major | `deal_samples` + `equity_vs_samples` cannot model the opponent's pre-discard triple: the discarded card depends on the triple and must be excluded from that sample's runout. | **fixed:** new `deal_triple_samples(board, dead, n, rng, keep_fn)` draws the triple, applies the caller's discard policy to (triple, board) only, and excludes **all three** opponent cards from the runout; a broken `keep_fn` degrades to keeping the two highest ranks (§3.3, §2 interface list, edge case 13). §8.3 corrected: `deal_samples` is for post-discard states only. Tested now (§6B8: exclusion of the discarded card, kept pair ⊂ triple, policy failures, and exactness against a full triple enumeration on a 5-card board), not deferred to F04. |
+| B5 | minor | Format-equivalence tests assert equality on a wall-clock-bounded function, so sample counts can differ. | **fixed:** equality assertions use only deterministic paths: `deal_samples` with a seed, `equity` with `budget_ms = inf` (fixed `MAX_SAMPLES` count; river exact), or a fake clock. The single real-time check asserts timing only (§6B5, §6B7). |
+
+### Round 2: 2026-11-11
 _Awaiting Codex review._
