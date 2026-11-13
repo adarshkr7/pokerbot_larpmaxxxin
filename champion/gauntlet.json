@@ -43,7 +43,8 @@
     219,
     220
   ],
-  "min_z": 2.0,
+  "min_z": -1.0,
   "max_bank_share": 0.6,
-  "jobs": 5
+  "jobs": 5,
+  "_min_z_comment": "Head-to-head vs the champion: z >= min_z. Relaxed from 2.0 to -1.0 on 14 Nov with the team's approval (non-inferiority: a candidate that fixes bugs may be promoted if it is not worse than the champion by more than 1 SE); strength claims still need many-seed evidence (AGENTS.md definition of done)."
 }

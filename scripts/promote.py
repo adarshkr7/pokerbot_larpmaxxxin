@@ -5,7 +5,8 @@ champion (champion/bot/), and it only ever changes through this script, after th
 
   1. submission checks (scripts/build.py: allowed imports, no stray stdout prints, <= 5 MB);
   2. hard gates on the gauntlet: 0 engine notices, 0 forfeits, time used within budget;
-  3. head-to-head vs the champion on paired seeds: mean chips/hand > 0 with z >= min_z;
+  3. head-to-head vs the champion on paired seeds: z >= min_z (gauntlet.json; a negative min_z is a
+     non-inferiority gate: not worse than the champion by more than |min_z| standard errors);
   4. gauntlet match points >= the champion's on the same opponents and seeds.
 
 On promotion it atomically replaces champion/bot/, writes champion/BEST.json, appends
