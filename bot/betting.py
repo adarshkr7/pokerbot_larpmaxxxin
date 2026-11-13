@@ -495,19 +495,24 @@ def _range_for(req, hand_state, o, street):
     w = _posterior(hc, req, hand_state, o, by).copy()
     tl = _tilts(req.get("history"), o.size_damp)
     dead = getattr(hand_state, "dead", None)
+    k4 = ("str", tuple(board[:4]), tuple(by["flop"]))
     if street == "river" and len(board) >= 5:
         g = tl["turn"] * o.tilt_mult
         if g != 0.0:
-            ok4 = _live(dead, board[:4])
-            k4 = ("str", tuple(board[:4]), tuple(by["flop"]))
             s4 = hc.get(k4)
             if s4 is None:
-                s4 = hc[k4] = _strengths(w, board[:4], ok4, "turn")
+                # their turn action is scored as it was on the turn: the river card is not dead yet (holdings
+                # containing it are removed below), so it cannot move the turn percentiles
+                d4 = bytearray(equity_mod._excluded(dead, []))
+                d4[int(board[4])] = 0
+                s4 = hc[k4] = _strengths(w, board[:4], _live(d4, board[:4]), "turn")
             idx4, _, u4 = s4
             w[idx4] *= np.exp(g * params.BET_U_SCALE * u4)
     ok = _live(dead, board)
     w[~ok] = 0.0
     idx, v, u = _strengths(w, board, ok, street)
+    if street == "turn" and len(board) == 4 and k4 not in hc:
+        hc[k4] = (idx, v, u)                      # the untilted turn percentiles, reused by the river (above)
     g = tl[street] * o.tilt_mult
     if g != 0.0:
         w[idx] *= np.exp(g * params.BET_U_SCALE * u)
@@ -560,13 +565,11 @@ def _turn_river_equity(req, hand_state, o, street, budget, cap, rng, t_start):
         wc = ww * c
         ec = float((wc * res).sum() / wc.sum()) if wc.sum() > 0 else e
         return e, ec, len(idx), "exact"
-    # turn: current-hand equity is the fallback if no time is left for sampling
+    # turn: with no time left for sampling, return None so _decide uses the draw-aware static path. Current-hand
+    # strength is not showdown equity on the turn: it ignores the river (a flush draw scores ~3% instead of ~36%).
     left = budget - (_now() - t_start) * 1000.0
     if left < params.BET_MIN_EXTRA_MS:
-        res = np.where(v < hv, 1.0, np.where(v == hv, 0.5, 0.0))
-        e = float((ww * res).sum() / ww.sum())
-        wc = ww * c
-        return e, float((wc * res).sum() / wc.sum()), 0, "now"
+        return None
     deadline = _now() + left / 1000.0
     dead = getattr(hand_state, "dead", None)
     x = equity_mod._excluded(dead, hero + board)
@@ -599,10 +602,7 @@ def _turn_river_equity(req, hand_state, o, street, budget, cap, rng, t_start):
         if now() >= deadline:
             break
     if n < params.BET_TURN_MIN_SAMPLES:
-        res = np.where(v < hv, 1.0, np.where(v == hv, 0.5, 0.0))
-        e = float((ww * res).sum() / ww.sum())
-        wc = ww * c
-        return e, float((wc * res).sum() / wc.sum()), 0, "now"
+        return None                                       # too few samples: the static path (see above)
     return acc / n, (accc / csum if csum > 0 else acc / n), n, "mc"
 
 

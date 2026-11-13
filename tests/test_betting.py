@@ -451,6 +451,68 @@ def test_river_calibration_weakens_their_betting_range_and_records_the_base():
     assert B._HC.get("pit_base") is None
 
 
+def test_turn_without_samples_uses_the_draw_aware_static_path(monkeypatch):
+    """Review bug 1: on the turn, current-hand strength is not equity. A flush draw + gutshot (5s6s on KsQs2d3c,
+    ~36% against a uniform range over the legal rivers) facing a 20-chip all-in into 360 must not fold when no
+    time is left for sampling or too few samples were drawn."""
+    hist = [{"street": "flop", "actor": "opp", "action": "check"}, {"street": "flop", "actor": "me", "action": "check"},
+            {"street": "turn", "actor": "me", "action": "check"},
+            {"street": "turn", "actor": "opp", "action": "raise", "amount": 20}]
+    r = req_("turn", ["Ks", "Qs", "2d", "3c"], pot=360, opp_bet=20, my_stack=20, opp_stack=0, history=hist)
+    assert r["legal_actions"] == ["fold", "call"]
+    h = hand_("5s 6s 2c", "Ks Qs 2d 3c", keep="5s 6s", opp_discard="7h")
+    o = B._Opp(Opp(arch={"random": 1.0}))
+    assert B._turn_river_equity(r, h, o, "turn", 0.0, 1000, random.Random(1), B._now()) is None
+    assert B._turn_river_equity(r, h, o, "turn", 1e9, params.BET_TURN_MIN_SAMPLES - 1, random.Random(1),
+                                B._now()) is None
+    e = B._turn_river_equity(r, h, o, "turn", 1e9, 1000, random.Random(1), B._now())
+    assert e[3] == "mc" and e[0] > 0.25                             # the sampler sees the river
+    st = B._static_equity(h, "turn", o, B._actions(r["history"])[0])
+    assert st[0] > 0.25                                             # the static fallback counts the draws
+    for budget in (0.001, 1.0):                                     # < BET_MIN_EXTRA_MS: no sampling
+        B._HC.clear()
+        B._HC["key"] = None
+        before = B.stats["path"].get("static", 0)
+        assert B.decide(r, h, Opp(arch={"random": 1.0}), Clock(budget), random.Random(1))["action"] == "call"
+        assert B.stats["path"].get("static", 0) == before + 1
+
+
+def test_river_range_scores_the_turn_action_without_the_river_card():
+    """Review bug 2: the turn percentiles behind their turn action must not see the river card as dead (holdings
+    containing it are dropped afterwards). And the river reuses the turn's own percentiles."""
+    board5 = "Kh 8h 3s 2c Ah"
+    hist = [{"street": "flop", "actor": "opp", "action": "check"}, {"street": "flop", "actor": "me", "action": "check"},
+            {"street": "turn", "actor": "opp", "action": "raise", "amount": 8},
+            {"street": "turn", "actor": "me", "action": "call", "amount": 8}]
+    r = req_("river", board5.split(), pot=28, history=hist)
+    h = hand_("As Ad 5c", board5, keep="As Ad", opp_discard="4d")
+    o = B._Opp(OppModel())
+    w = B._range_for(r, h, o, "river")[0].copy()
+    by, _ = B._actions(r["history"])
+    post = B._posterior(B._hand_cache(h), r, h, o, by).copy()
+    board = list(h.board)
+    dead4 = dead_mask(list(h.hole3) + board[:4] + [parse("4d")])
+    idx4, _, u4 = B._strengths(post, board[:4], B._live(dead4, board[:4]), "turn")
+    g = B._tilts(r["history"], o.size_damp)["turn"] * o.tilt_mult
+    assert g != 0.0 and B._tilts(r["history"], o.size_damp)["river"] == 0.0
+    want = post.copy()
+    want[idx4] *= np.exp(g * params.BET_U_SCALE * u4)
+    want[~B._live(h.dead, board)] = 0.0
+    assert np.allclose(w / w.sum(), want / want.sum(), rtol=1e-9, atol=1e-12)
+    # the old reconstruction (river card dead on the turn) moves the turn percentiles: the test can tell
+    idx_bad, _, u_bad = B._strengths(post, board[:4], B._live(h.dead, board[:4]), "turn")
+    assert np.abs(u_bad - u4[np.isin(idx4, idx_bad)]).max() > 0.01
+    # turn first, then river (the live order): the cached turn percentiles give the same river range
+    B._HC.clear()
+    B._HC["key"] = None
+    h4 = hand_("As Ad 5c", "Kh 8h 3s 2c", keep="As Ad", opp_discard="4d")
+    B._range_for(req_("turn", "Kh 8h 3s 2c".split(), pot=28, history=hist[:2]), h4, o, "turn")
+    h4.board = ids(board5)
+    h4.rebuild_dead()
+    w2 = B._range_for(r, h4, o, "river")[0]
+    assert np.allclose(w2, w, rtol=1e-12, atol=0)
+
+
 def test_bluff_exploit_test():
     # 2/3 pot: bar 0.4. Trusted fold-to-bet above the bar -> always; below the floor -> never
     assert B.bluff_prob(20, 30, 0.45, True) == 1.0
