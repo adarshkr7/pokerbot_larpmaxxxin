@@ -143,6 +143,32 @@ def semi_prob(ftb, known, mult=1.0):
 
 
 # ----------------------------------------------------------------------------------------------- opponent reads
+def _tilted_mean(k):
+    """Mean of u under the density exp(k u) on [0, 1] (0.5 at k = 0; increasing in k)."""
+    if abs(k) < 1e-6:
+        return 0.5
+    return 1.0 / (1.0 - math.exp(-k)) - 1.0 / k
+
+
+def pit_k(m):
+    """The tilt k with _tilted_mean(k) = m, clipped to [BET_PIT_K_LO, BET_PIT_K_HI] (bisection; 0 for m = 0.5)."""
+    lo, hi = float(params.BET_PIT_K_LO), float(params.BET_PIT_K_HI)
+    m = _finite(m, 0.5)
+    if abs(m - 0.5) < 1e-9:
+        return 0.0
+    if m <= _tilted_mean(lo):
+        return lo
+    if m >= _tilted_mean(hi):
+        return hi
+    for _ in range(40):
+        mid = 0.5 * (lo + hi)
+        if _tilted_mean(mid) < m:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
 def _arch(opp):
     """B8b: archetype weights, normalised; unknown or malformed -> {"neutral": 1}."""
     try:
@@ -176,6 +202,10 @@ class _Opp:
         self.reads = preflop_mod._Reads(opp)
         self.known = self.reads.on
         self.ftb = self.reads.fold_to_bet
+        # per-street fold-to-bet (the model shrinks each towards the aggregate, so thin street data falls back to
+        # it on its own); untrusted stats -> the aggregate default for every street
+        self.ftb_st = {st: (preflop_mod._stat(opp, "fold_to_bet_" + st, self.ftb) if self.known else self.ftb)
+                       for st in STREETS}
         self.aw = _arch(opp)
         self.info = max(0.0, min(1.0, _blend(self.aw, "range_info", 1.0)))
         agg_mult = 1.0
@@ -204,6 +234,8 @@ class _Opp:
         self.semi_mult = max(0.0, _blend(self.aw, "semi", 1.0))
         self.size_mult = max(0.5, _blend(self.aw, "size_mult", 1.0))
         self.cbet = max(0.0, min(1.0, _blend(self.aw, "cbet", 0.0)))
+        # river-bet calibration from their shown hands (shrunk to 0.5 = none; read from the first hand)
+        self.river_k = pit_k(preflop_mod._stat(opp, "river_pit", 0.5))
 
     def value_th(self, street):
         return _blend(self.aw, "value_th", params.BET_VALUE_TH[street])
@@ -453,31 +485,43 @@ def _range_for(req, hand_state, o, street):
     hc = _hand_cache(hand_state)
     by, _ = _actions(req.get("history"))
     board = list(getattr(hand_state, "board", []))
+    facing_river_bet = street == "river" and bool(by["river"]) and by["river"][-1] == "raise"
+    k_pit = o.river_k if facing_river_bet else 0.0
     key = ("range", tuple(board), tuple(by["flop"]), tuple(by["turn"]), tuple(by["river"]), o.tilt_mult,
-           o.call_station, o.size_damp)
+           o.call_station, o.size_damp, k_pit)
     got = hc.get(key)
     if got is not None:
         return got
     w = _posterior(hc, req, hand_state, o, by).copy()
     tl = _tilts(req.get("history"), o.size_damp)
     dead = getattr(hand_state, "dead", None)
+    k4 = ("str", tuple(board[:4]), tuple(by["flop"]))
     if street == "river" and len(board) >= 5:
         g = tl["turn"] * o.tilt_mult
         if g != 0.0:
-            ok4 = _live(dead, board[:4])
-            k4 = ("str", tuple(board[:4]), tuple(by["flop"]))
             s4 = hc.get(k4)
             if s4 is None:
-                s4 = hc[k4] = _strengths(w, board[:4], ok4, "turn")
+                # their turn action is scored as it was on the turn: the river card is not dead yet (holdings
+                # containing it are removed below), so it cannot move the turn percentiles
+                d4 = bytearray(equity_mod._excluded(dead, []))
+                d4[int(board[4])] = 0
+                s4 = hc[k4] = _strengths(w, board[:4], _live(d4, board[:4]), "turn")
             idx4, _, u4 = s4
             w[idx4] *= np.exp(g * params.BET_U_SCALE * u4)
     ok = _live(dead, board)
     w[~ok] = 0.0
     idx, v, u = _strengths(w, board, ok, street)
+    if street == "turn" and len(board) == 4 and k4 not in hc:
+        hc[k4] = (idx, v, u)                      # the untilted turn percentiles, reused by the river (above)
     g = tl[street] * o.tilt_mult
     if g != 0.0:
         w[idx] *= np.exp(g * params.BET_U_SCALE * u)
         idx, v, u = _strengths(w, board, ok, street)
+    if facing_river_bet:
+        hc["pit_base"] = (idx, u)                 # the uncorrected model's percentiles (river_pit is measured here)
+        if k_pit != 0.0:
+            w[idx] *= np.exp(k_pit * u)
+            idx, v, u = _strengths(w, board, ok, street)
     got = hc[key] = (w, idx, v, u)
     return got
 
@@ -521,13 +565,11 @@ def _turn_river_equity(req, hand_state, o, street, budget, cap, rng, t_start):
         wc = ww * c
         ec = float((wc * res).sum() / wc.sum()) if wc.sum() > 0 else e
         return e, ec, len(idx), "exact"
-    # turn: current-hand equity is the fallback if no time is left for sampling
+    # turn: with no time left for sampling, return None so _decide uses the draw-aware static path. Current-hand
+    # strength is not showdown equity on the turn: it ignores the river (a flush draw scores ~3% instead of ~36%).
     left = budget - (_now() - t_start) * 1000.0
     if left < params.BET_MIN_EXTRA_MS:
-        res = np.where(v < hv, 1.0, np.where(v == hv, 0.5, 0.0))
-        e = float((ww * res).sum() / ww.sum())
-        wc = ww * c
-        return e, float((wc * res).sum() / wc.sum()), 0, "now"
+        return None
     deadline = _now() + left / 1000.0
     dead = getattr(hand_state, "dead", None)
     x = equity_mod._excluded(dead, hero + board)
@@ -560,10 +602,7 @@ def _turn_river_equity(req, hand_state, o, street, budget, cap, rng, t_start):
         if now() >= deadline:
             break
     if n < params.BET_TURN_MIN_SAMPLES:
-        res = np.where(v < hv, 1.0, np.where(v == hv, 0.5, 0.0))
-        e = float((ww * res).sum() / ww.sum())
-        wc = ww * c
-        return e, float((wc * res).sum() / wc.sum()), 0, "now"
+        return None                                       # too few samples: the static path (see above)
     return acc / n, (accc / csum if csum > 0 else acc / n), n, "mc"
 
 
@@ -709,6 +748,11 @@ def _decide(req, hand_state, opp, clock, rng, t0):
         res = _static_equity(hand_state, street, o, by)
     e, ec, n, _ = res
     intent, why = _choose(s, street, e, ec, o, ip, req, hand_state, rng, pre)
+    if street == "river" and s.to_call > 0 and intent.get("action") == "call" and path in ("exact", "cache"):
+        try:                                   # river-bet calibration: their shown hand is scored at hand_result
+            hand_state.river_pit = hc.get("pit_base")
+        except Exception:
+            pass
     ms = (_now() - t0) * 1000.0
     _record(street, ms, tier, path)
     px = s.to_call / (s.pot + s.to_call) if s.to_call > 0 else 0.0
@@ -748,15 +792,16 @@ def _choose(s, street, e, ec, o, ip, req, hand_state, rng, pre):
     raises_left = rl if isinstance(rl, int) and not isinstance(rl, bool) else 4
     can_raise = s.can_raise and s.opp_stack > 0
     board = list(getattr(hand_state, "board", []))
+    ftb = o.ftb_st.get(street, o.ftb)               # their fold-to-bet on this street (aggregate if untrusted)
     if s.to_call <= 0:
         if can_raise and ec >= o.value_th(street):
             return {"action": "raise", "amount": _value_size(ec, e, street, s, o, _wet(board))}, "value"
         if can_raise and street != "river" and e >= params.BET_SEMI_EQ_LO and _has_draw(hand_state, street):
-            if rng.random() < semi_prob(o.ftb, o.known, o.semi_mult):
+            if rng.random() < semi_prob(ftb, o.known, o.semi_mult):
                 return {"action": "raise", "amount": bet_amount(s, params.BET_F_STD)}, "semi"
         if can_raise and street == "river" and e < params.BET_AIR_TH:
             amt = bet_amount(s, params.BET_F_STD)
-            if rng.random() < bluff_prob(amt - s.my_bet, s.pot, o.ftb, o.known, o.bluff_mult):
+            if rng.random() < bluff_prob(amt - s.my_bet, s.pot, ftb, o.known, o.bluff_mult):
                 return {"action": "raise", "amount": amt}, "bluff"
         if can_raise and street == "flop" and o.cbet > 0 and any(a == "me" and x == "raise" for a, x in pre):
             if rng.random() < o.cbet:
@@ -768,7 +813,7 @@ def _choose(s, street, e, ec, o, ip, req, hand_state, rng, pre):
     price = s.to_call / (s.pot + s.to_call)
     if (can_raise and raises_left > 1 and street != "river" and e >= params.BET_SEMI_EQ_LO
             and price <= params.BET_SEMI_MAX_PRICE and _has_draw(hand_state, street)):
-        if rng.random() < semi_prob(o.ftb, o.known, o.semi_mult) * params.BET_SEMI_RAISE_MULT:
+        if rng.random() < semi_prob(ftb, o.known, o.semi_mult) * params.BET_SEMI_RAISE_MULT:
             return {"action": "raise", "amount": bet_amount(s, params.BET_F_STD)}, "semi-raise"
     if "call" in s.legal and calls(e, s.to_call, s.pot, street, ip, no_future):
         return _act("call"), "call"
