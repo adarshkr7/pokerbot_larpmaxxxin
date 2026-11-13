@@ -20,12 +20,8 @@ Thumbs.db
 .vscode/
 .idea/
 
-# Rival sparring bots: third-party code, local only (never committed, never shipped)
-rivals/*
-!rivals/mit_adapter.py
-!rivals/fetch_rivals.py
-!rivals/rivals.json
-!rivals/README.md
+# Third-party bots are not kept in this repo (removed Fri 13 Nov); never commit any
+rivals/
 .venv-rivals/
 
 # Promotion scratch

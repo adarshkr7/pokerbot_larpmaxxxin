@@ -72,7 +72,7 @@ A candidate replaces the champion only if **all** of these hold:
 4. **Gauntlet match points** ≥ the champion's.
 
 The gauntlet is defined in `champion/gauntlet.json`: opponents, seeds, hands, thresholds. **Add each new sparring
-bot there** as it is written (and rivals, if you approve running them). Changing it re-measures the champion
+bot there** as it is written (our own bots only; third-party bots were removed from the repo). Changing it re-measures the champion
 automatically. For the final pick on Sat/Sun, use a **held-out seed range** so we don't overfit the gauntlet seeds.
 
 ## Strategy areas and build order
@@ -109,7 +109,7 @@ attempt** and, if promoted, an **upload of `dist/submission.zip`**.
 ```bash
 .venv/Scripts/python.exe -m pytest                                    # unit + protocol tests
 .venv/Scripts/python.exe scripts/build.py --check                     # submission checks for bot/
-.venv/Scripts/python.exe scripts/arena.py --rivals random starter --seeds 8   # quick signal
+.venv/Scripts/python.exe scripts/arena.py --opps random starter --seeds 8     # quick signal
 .venv/Scripts/python.exe scripts/promote.py --dry-run                 # full gate, no change
 .venv/Scripts/python.exe scripts/promote.py --note "what changed"     # promote if it wins
 cat champion/BEST.json                                                # current champion and its scores

@@ -27,7 +27,7 @@ Hold'em where each player gets **3 hole cards** and, after flop betting, both pl
 | `scripts/build.py` | Validates `bot/` (imports, stray stdout prints) and builds `dist/submission.zip` | Yes |
 | `tests/` | pytest: protocol tests (bot as subprocess) + a seeded engine match | Yes |
 | `requirements*.txt`, `pyproject.toml` | Pinned deps (runtime: numpy, scipy; dev: pytest) and pytest config | Yes |
-| `rivals/` | MIT 2026 sparring bots via `mit_adapter.py` + `scripts/arena.py` (third-party code: local only, gitignored except adapter/fetch/registry/README) | Adapter only |
+| `tests/*_bot.py` | Our own sparring bots (`shove_bot`, `station_bot`, `nit_bot`, `maniac_bot`), stdlib only, used by `scripts/arena.py` | Yes |
 | `starter_kit/` | Organiser-supplied `engine.py`, reference `bot.py`, `example_bots/random_bot.py` | **No.** Treat as read-only vendor code |
 | `docs/` | Official PDFs | No |
 | `logs/` | Engine output (gitignored) | Generated |
@@ -178,15 +178,17 @@ and equity, F03 for the sparring bots); where a plan and its strategy file disag
 Real promotions happen only from committed code on `main` (`promote.py` refuses otherwise).
 Commits carry no AI co-author or attribution trailers.
 
-## Rivals (sparring bots)
+## Sparring bots
 
-- `rivals/` holds third-party MIT Pokerbots 2026 bots run through `rivals/mit_adapter.py`.
-  See `rivals/README.md` for setup, the fidelity caveats (MIT's game differs from ours) and the safety notes.
-- **Never import `rivals/` from `bot/`, and never copy rival code or ideas-as-code into our bot**
-  (Rulebook 10.1; organisers run similarity checks). Reading their READMEs for ideas is fine.
-- Rivals need `pkrbot`, so they run with `.venv-rivals/`. Our bot must still pass `scripts/build.py`
-  (which rejects `pkrbot` and every other non-allowed import).
-- Benchmark with `scripts/arena.py` (many seeds, W-D-L, chips/hand ± SE).
+- We test only against bots we may rely on: `random` and `starter` (organiser kit), `champion` (the frozen
+  champion) and **our own sparring bots** in `tests/` (`shove_bot.py`, `station_bot.py`, `nit_bot.py`,
+  `maniac_bot.py`; add more there, stdlib only). `scripts/arena.py` runs them (many seeds, W-D-L,
+  chips/hand ± SE); with no `--opps` it uses that whole pool.
+- **The MIT Pokerbots 2026 bots were removed from the repo on Fri 13 Nov** (the `rivals/` directory, its adapter
+  and its separate virtualenv). They were written for a different game and only played ours through an adapter,
+  so results against them were unreliable. Do not re-add third-party bots.
+- **Never copy code from public pokerbot repositories or other teams into `bot/`** (Rulebook 10.1; organisers
+  run similarity checks). `strategies/09_rival_lessons.md` keeps ideas taken from READMEs only.
 
 ## Git
 

@@ -50,7 +50,7 @@ irrelevant for us. Our discard is purely about our own hand, plus the informatio
 7. **jeffelin/CFR_pokerbot** (found by Gemini; the repo exists, details unverified): reportedly CFR+ with
    150k–500k information sets, hand-category buckets (pairs, two pair, trips, draws) × board textures,
    and a 7-archetype Bayesian opponent classifier that switches from equilibrium play to exploitation.
-   A candidate to add to `rivals/` as a sparring partner.
+   (We no longer keep or run third-party bots; see 08/T1.)
 8. **General lessons from past MIT write-ups (via Gemini):**
    - speed and stability beat heavy models in Python;
    - precomputed tables are essential;

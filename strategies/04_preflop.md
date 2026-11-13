@@ -83,7 +83,7 @@ Status: done (open to 6, 3-bet 3x, 4-bet 2.2x, all-in when a raise commits > 40%
   never faces a shove with only the small blind in.) Two views:
   - Gemini: gate at **~56.5% vs random (≈ the top 34%)**, giving up a little EV for much lower variance.
   - GPT-astra: "wait for premiums" is not automatically best; an indiscriminate shover justifies broad calls.
-  **Decide in the arena** with `charlar_all_in_v2` and our own shove bot: compare match-win rate, not chips.
+  **Decide in the arena** with our own shove and maniac bots (`tests/`): compare match-win rate, not chips.
   Stop opening small speculative hands.
 - vs a nit or big blind that over-folds (fold-to-steal > 0.62): open 100% of buttons, min-raise to 4. (The
   steal risks 3 to win 3, so it breaks even at 50% folds before counting our equity when called.)

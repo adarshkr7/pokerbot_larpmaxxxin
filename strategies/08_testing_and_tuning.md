@@ -1,9 +1,10 @@
 # 08: Testing and tuning methodology
 
 ## T1. Sparring ladder (P0)
-Built-in: `random`, `starter` (check/call). Rivals (via adapter, approximate): MIT reference
-bots 1–3, `jlam_agent_1_2`, `camello_*`, `charlar_all_in_v2` (maniac), etc. See `rivals/README.md`.
-Add our own archetype bots (cheap, ~30 lines each, written by us):
+Built-in: `random`, `starter` (check/call), `champion` (the frozen champion). The MIT 2026 bots we used at
+first were removed from the repo on Fri 13 Nov (written for a different game, played through an adapter, so
+results against them were unreliable); we no longer test against third-party bots.
+Our own archetype bots (cheap, ~30 lines each, written by us):
 - `station.py`: always call, never raise;
 - `maniac.py`: raise or shove ~70% of the time;
 - `nit.py`: plays the top 20% only, folds to any bet without top pair+;
@@ -16,7 +17,7 @@ Add our own archetype bots (cheap, ~30 lines each, written by us):
     robustness);
   - `min_click.py`: always min-raises up to the cap (tests off-tree sizes and cap handling).
 
-Status: partly done: `tests/shove_bot.py`, `station_bot.py`, `nit_bot.py`, `maniac_bot.py` exist and are used in the arena; they are **not yet in `champion/gauntlet.json`** (the promotion gauntlet is still random + starter). The other bots in this list are not written. Rivals ready.
+Status: partly done: `tests/shove_bot.py`, `station_bot.py`, `nit_bot.py`, `maniac_bot.py` exist and are used in the arena; they are **not yet in `champion/gauntlet.json`** (the promotion gauntlet is still random + starter). The other bots in this list are not written. No third-party rivals.
 
 ## T2. Arena protocol (P0)
 `scripts/arena.py`: N seeds × opponents, W-D-L and chips/hand ± SE.

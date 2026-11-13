@@ -58,7 +58,7 @@ LOCK = CHAMP / ".lock"
 CAPS = {1: 400, 2: 1000}
 BANK_S = {1: 30.0, 2: 75.0}
 DEFAULT_GAUNTLET = {
-    "_comment": "Promotion gauntlet. Add sparring bots (scripts/sparring/*.py paths) and rivals as they exist. "
+    "_comment": "Promotion gauntlet. Add our own sparring bots (tests/*_bot.py paths) as they exist. "
                 "Changing this file invalidates the champion's cached gauntlet score (it is re-measured).",
     "stage": 1,
     "hands": 400,
@@ -125,7 +125,7 @@ def gauntlet_hash(g):
 
 def run_matches(bot_py, pairs, g):
     """pairs: list of (opp_name, opp_path, seed). Returns list of result dicts."""
-    args = SimpleNamespace(python=str(arena.RIVALS_PY if arena.RIVALS_PY.exists() else sys.executable),
+    args = SimpleNamespace(python=str(arena.BOT_PY),
                            hands=g["hands"], stage=g["stage"], no_time_limits=False)
     with ThreadPoolExecutor(g["jobs"]) as ex:
         futs = [ex.submit(arena.play, bot_py, n, p, s, args) for n, p, s in pairs]

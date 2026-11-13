@@ -62,7 +62,8 @@ the same checkout.
 - **Contracts in [INTERFACES.md](INTERFACES.md).** An implementation that needs a different signature says so in
   its report; the orchestrator updates the contract.
 - **One implementer at a time on `bot/`.** No parallel subagents, no worktrees.
-- **No hand edits** to `champion/`, `dist/`, `starter_kit/`, `docs/`, `rivals/_src/`.
-- **Rulebook 10.1:** never copy code from public bot repos (including `rivals/_src/`) into `bot/`.
+- **No hand edits** to `champion/bot/`, `dist/`, `starter_kit/`, `docs/`.
+- **Rulebook 10.1:** never copy code from public bot repos into `bot/`. Third-party bots are no longer kept
+  in the repo; test against the kit bots, the champion and our own sparring bots in `tests/`.
 - **The sandbox:** bot code uses only stdlib, numpy and scipy; no file writes, no network, no subprocesses.
 - **Commits** only when we ask, with no AI co-author or attribution trailers.

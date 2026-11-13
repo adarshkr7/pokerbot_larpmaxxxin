@@ -9,7 +9,7 @@
 - `bot/<module>.py`, `tests/test_<module>.py`, `# --- Wn ---` section of `bot/params.py`
 
 ## Must not edit
-Everything else (ask the coordinator). Never `champion/`, `dist/`, `starter_kit/`, `docs/`, `rivals/`.
+Everything else (ask the coordinator). Never `champion/`, `dist/`, `starter_kit/`, `docs/`.
 
 ## Interfaces
 Implements: <from agents/INTERFACES.md>. Depends on: <modules; stub them if not merged>.
@@ -22,7 +22,7 @@ Implements: <from agents/INTERFACES.md>. Depends on: <modules; stub them if not 
 2. <independent check 2>
 
 ## Measure
-`pytest` · `scripts/build.py --check` · `scripts/arena.py --rivals random starter --seeds 8` ·
+`pytest` · `scripts/build.py --check` · `scripts/arena.py --opps random starter --seeds 8` ·
 `scripts/promote.py --dry-run`
 
 ## Done when

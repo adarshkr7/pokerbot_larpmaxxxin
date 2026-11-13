@@ -1,5 +1,5 @@
 {
-  "_comment": "Promotion gauntlet. Add sparring bots (scripts/sparring/*.py paths) and rivals as they exist. Changing this file invalidates the champion's cached gauntlet score (it is re-measured).",
+  "_comment": "Promotion gauntlet. Add our own sparring bots (tests/*_bot.py paths) as they exist. Changing this file invalidates the champion's cached gauntlet score (it is re-measured).",
   "stage": 1,
   "hands": 400,
   "seeds": [

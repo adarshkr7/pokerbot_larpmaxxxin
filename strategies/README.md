@@ -41,7 +41,7 @@ Several of its precise figures (LP timings, evals/s, σ, bb/100 impacts) are unv
 | 06 | [06_opponent_modelling.md](06_opponent_modelling.md) | Exploitation | Stats with priors, 5 archetypes, per-archetype counter-strategies (P1/P2) |
 | 07 | [07_game_theory.md](07_game_theory.md) | GTO options | Mixing, balance, small CFR (preflop/river) (P2/P3) |
 | 08 | [08_testing_and_tuning.md](08_testing_and_tuning.md) | Process | Arena, sparring ladder, significance, tuning sweeps (P0/P1) |
-| 09 | [09_rival_lessons.md](09_rival_lessons.md) | What MIT 2026 teams did | Ideas and lessons, and what does NOT transfer to our rules |
+| 09 | [09_rival_lessons.md](09_rival_lessons.md) | What MIT 2026 teams did | Ideas from their READMEs only (no code, and their bots are not in this repo), and what does NOT transfer to our rules |
 | — | [gemini_report.md](gemini_report.md) | Gemini research digest | Top-10 list with our verdicts, verified/unverified claims, formulas, thresholds |
 | — | [gpt_astra_report.md](gpt_astra_report.md) | GPT-astra research digest | Its key correction: realistic opponent discard simulation; stats and testing rigour; all its maths verified |
 

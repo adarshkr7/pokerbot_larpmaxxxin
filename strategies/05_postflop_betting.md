@@ -81,7 +81,7 @@ Replace "vs random" with "vs range" (03/D2 machinery) on every street after the 
 aggression. A bet or raise from a passive opponent is strong, so shift their range heavily.
 - **The shift must grow with the size of the bet** (added Fri 13 Nov after the first arena runs; not part of
   the Codex round). As first built, a shove narrowed their range no more than a 2-chip bet, and the biggest
-  losses vs `jlam_agent_1_2` were pot-odds calls of flop all-ins against a barely narrowed range. Scale the
+  losses vs a betting sparring bot were pot-odds calls of flop all-ins against a barely narrowed range. Scale the
   narrowing by the bet's share of the pot (`to_call / (pot − to_call)` for an opening bet), larger again for
   an all-in, and bounded so one bet can't collapse the range. This is the built-in prior; B8 (learning this
   opponent's own size → strength mapping from showdowns) stays separate and optional.
