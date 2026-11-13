@@ -10,15 +10,16 @@
     105,
     106,
     107,
-    108,
-    109,
-    110,
-    111,
-    112
+    108
   ],
   "opponents": [
     "random",
-    "starter"
+    "starter",
+    "tests/shove_bot.py",
+    "tests/station_bot.py",
+    "tests/nit_bot.py",
+    "tests/maniac_bot.py",
+    "tests/potodds_bot.py"
   ],
   "h2h_seeds": [
     201,

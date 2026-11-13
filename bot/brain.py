@@ -54,6 +54,9 @@ class Brain:
         try:                                     # a modelling bug must never affect play: swallow and log
             seat = self.hand.seat if self.hand is not None else None
             self.opp.observe_hand(msg, seat)
+            pit = getattr(self.hand, "river_pit", None) if self.hand is not None else None
+            if pit is not None:
+                self.opp.observe_pit(msg, pit)
         except Exception:
             log_exc("opponent model")
         self.hand = None

@@ -176,6 +176,11 @@ BET_SIZE_ALLIN = 1.2              # an all-in: m x 1.2 (so a shove reaches 1.1 x
 BET_SIZE_DAMP_ALLIN = (0.08, 0.30)  # their all-in frequency ramp: the amplification above m = 1 fades to 0 (a
                                   # maniac's shoves say little); 0.08 = the 06/M1 prior, so no damping by default
 BET_MDF_MULT_LO = 0.5             # 07/G2: the MDF diagnostic may cut their tilt to no less than half
+# River-bet calibration: facing their river bet / raise, the range is reweighted by exp(k u) (u = strength
+# percentile within the modelled range), k fitted so the tilted uniform's mean matches opp.stat("river_pit") (the
+# mean percentile of their shown hands within the *uncorrected* range; 0.5 = the model is right). Bounded:
+BET_PIT_K_LO = -5.0               # at most this much weaker (mean percentile ~0.19) ...
+BET_PIT_K_HI = 1.5                # ... or this much stronger (~0.62)
 
 # --- W6 ---
 # Opponent model (strategies/06_opponent_modelling.md M1, M2, M4). Frequencies: est = (k + N0 * prior) / (n + N0)
@@ -208,3 +213,4 @@ OPP_RANDOM_SHOWDOWNS = (6.0, 15.0)  # ... and only with enough showdowns to tell
 OPP_MDF_MIN_BETS = (15.0, 25.0)   # confidence ramp over the (forgotten) number of their opening bets
 OPP_MDF_EXCESS = (0.05, 0.25)     # fold-rate excess over 1 - MDF -> reduction ramp 0 .. 1 - BET_MDF_MULT_LO
 OPP_AGGRO_AF = (2.5, 3.5)         # aggressive = max(maniac weight, ramp of the aggression factor)
+OPP_PIT_N0 = 4.0                  # river_pit: mean percentile of their shown river-betting hands, shrunk to 0.5

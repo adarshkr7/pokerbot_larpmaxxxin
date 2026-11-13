@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from engine_util import (CHAMPION, RANDOM_BOT, STARTER, TESTS, assert_clean, run_match)
+from engine_util import (RANDOM_BOT, STARTER, TESTS, V0_BOT, assert_clean, run_match)
 
 OPPONENTS = {"random": RANDOM_BOT, "starter": STARTER}
 
@@ -41,12 +41,12 @@ def test_state_invariants_on_real_engine_sequences(tmp_path, opp):
 V0_DISCARD_ENV = dict(os.environ, PATCH_MODE="v0_discard,v0_preflop,v0_postflop")
 
 
-def test_c1_head_to_head_vs_champion_is_exactly_zero(tmp_path):
+def test_c1_head_to_head_vs_v0_is_exactly_zero(tmp_path):
     """Identical deterministic strategies cancel exactly under duplicate deals. Our discard (F05/W3), preflop
     play (W4) and postflop betting (W5) are the intended differences from v0, so all three are swapped back to v0's
     here (tests/patched_bot.py, modes v0_discard,v0_preflop,v0_postflop)."""
     def one(seed):
-        return seed, run_match(TESTS / "patched_bot.py", CHAMPION, seed=seed, log_dir=tmp_path / f"s{seed}",
+        return seed, run_match(TESTS / "patched_bot.py", V0_BOT, seed=seed, log_dir=tmp_path / f"s{seed}",
                                hands=400, env=V0_DISCARD_ENV)
     for seed, (out, res) in parallel(one, range(301, 311)):
         assert_clean(out, res)
@@ -80,7 +80,7 @@ def test_c2_play_identical_to_v0_against_starter(tmp_path):
         return deterministic_view((d / "match.log").read_text(encoding="utf-8"))
     seeds = range(401, 406)
     ours = parallel(one, [(TESTS / "patched_bot.py", s) for s in seeds])
-    v0 = parallel(one, [(CHAMPION, s) for s in seeds])
+    v0 = parallel(one, [(V0_BOT, s) for s in seeds])
     for seed, a, b in zip(seeds, ours, v0):
         assert len(a) == 400 + 5, (seed, len(a))
         assert a == b, f"seed {seed}: play differs from v0"

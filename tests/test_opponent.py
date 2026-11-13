@@ -463,6 +463,31 @@ def test_the_model_is_cheap():
     assert (time.perf_counter() - t) / len(res) < 0.001
 
 
+def test_river_pit_counts_only_shown_pairs_in_the_stored_range():
+    import numpy as np
+    from cards import pair_index, parse
+    m = no_decay()
+    assert m.stat("river_pit") == 0.5
+    hist = [H("preflop", "me", "raise", 6), H("preflop", "opp", "call", 6), H("river", "opp", "raise", 8),
+            H("river", "me", "call", 8)]
+    board = ["2c", "7d", "9h", "Ks", "4s"]
+    shown = ["Ah", "3d"]
+    pi = pair_index(parse("Ah"), parse("3d"))
+    pit = (np.array([5, pi, 7]), np.array([0.9, 0.1, 0.4]))
+    sd = result(hist, "showdown", opp_hole=shown, opp_discard="5c", board=board)
+    for _ in range(6):
+        m.observe_hand(sd)
+        m.observe_pit(sd, pit)
+    assert m.stat("river_pit") == pytest.approx((6 * 0.1 + params.OPP_PIT_N0 * 0.5) / (6 + params.OPP_PIT_N0))
+    before = m.stat("river_pit")
+    m.observe_pit(result(hist), pit)                                  # no showdown: nothing
+    m.observe_pit(sd, None)
+    m.observe_pit(sd, (np.array([1, 2]), np.array([0.0, 0.0])))       # their pair not in the range: nothing
+    m.observe_pit("junk", pit)
+    m.observe_pit(sd, "junk")
+    assert m.stat("river_pit") == before
+
+
 # ----------------------------------------------------------------------------------------------- consumers
 def test_shove_estimate_is_read_from_the_first_hand():
     jam = result([H("preflop", "opp", "raise", 200), H("preflop", "me", "fold")])

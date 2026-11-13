@@ -10,6 +10,7 @@ TESTS = ROOT / "tests"
 ENGINE_PATH = ROOT / "starter_kit" / "engine.py"
 BOT = ROOT / "bot" / "bot.py"
 CHAMPION = ROOT / "champion" / "bot" / "bot.py"
+V0_BOT = ROOT / "tests" / "v0_bot.py"          # frozen v0; champion/ changes with every promotion
 RANDOM_BOT = ROOT / "starter_kit" / "example_bots" / "random_bot.py"
 STARTER = ROOT / "starter_kit" / "bot.py"
 PY = sys.executable

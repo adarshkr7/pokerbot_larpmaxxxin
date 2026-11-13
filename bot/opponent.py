@@ -25,6 +25,8 @@ stat(name) serves (shrunk, bounded estimates; unknown names -> 0.0):
   toss_lowest    the raw toss rate once >= OPP_TOSS_MIN_N showdowns are counted, else 0
   showdowns      showdowns counted (forgotten)
   mdf_tilt       07/G2 multiplier (BET_MDF_MULT_LO .. 1) on how strongly their bets narrow their range
+  river_pit      mean strength percentile of their shown hands within the (uncorrected) range we called their
+                 river bet with (fed by observe_pit); 0.5 = calibrated, below = they bet weaker      prior 0.5, N0 4
 
 archetype_weights() -> {station, nit, random, maniac, neutral} >= 0, summing to 1, computed only through
 self.stat(...) (so a test double that overrides stat() gets consistent weights). Everything starts neutral.
@@ -33,7 +35,7 @@ Nothing here raises out of a public method.
 import math
 
 import params
-from cards import is_valid, parse
+from cards import is_valid, pair_index, parse
 from discard import flop_score
 from evaluator import eval7
 from log import log, log_exc
@@ -231,6 +233,31 @@ class OppModel:
         except Exception:
             log_exc("opponent.observe_hand")
 
+    def observe_pit(self, msg, pit):
+        """River-bet calibration: `pit` = (pair_index array, percentile array) of the range we called their river
+        bet with (uncorrected model). At a showdown, the percentile of their shown pair is counted towards
+        river_pit (decayed with the other counts). Call after observe_hand for the same hand. Never raises."""
+        try:
+            if pit is None or not isinstance(msg, dict) or msg.get("result") != "showdown":
+                return
+            kept = msg.get("opp_hole_cards")
+            if not (isinstance(kept, list) and len(kept) == 2 and all(is_valid(c) for c in kept)):
+                return
+            a, b = parse(kept[0]), parse(kept[1])
+            if a == b:
+                return
+            idx, u = pit
+            pi = pair_index(a, b)
+            for j, x in enumerate(idx):
+                if int(x) == pi:
+                    v = float(u[j])
+                    if math.isfinite(v):
+                        self._k["river_pit"] = self._k.get("river_pit", 0.0) + min(1.0, max(0.0, v))
+                        self._n["river_pit"] = self._n.get("river_pit", 0.0) + 1.0
+                    return
+        except Exception:
+            log_exc("opponent.observe_pit")
+
     def observe_showdown(self, msg, seat=None):
         self.observe_hand(msg, seat)
 
@@ -257,7 +284,7 @@ class OppModel:
             prior, n0 = params.OPP_FREQ[name]
             return shrink(k.get(name, 0.0), n.get(name, 0.0), prior, n0)
         if name.startswith("fold_to_bet_") and name[12:] in _ST:
-            overall = self._stat("fold_to_bet")
+            overall = self.stat("fold_to_bet")      # via stat(): a test double's override flows through
             return shrink(k.get(name, 0.0), n.get(name, 0.0), overall, params.OPP_STREET_N0)
         if name == "aggression":
             af = getattr(self, "_af", None) or [0.0, 0.0]
@@ -272,6 +299,8 @@ class OppModel:
             return k.get("toss_rate", 0.0) / nn if nn >= params.OPP_TOSS_MIN_N - 1e-9 else 0.0
         if name == "mdf_tilt":
             return self._mdf_tilt()
+        if name == "river_pit":
+            return shrink(k.get("river_pit", 0.0), n.get("river_pit", 0.0), 0.5, params.OPP_PIT_N0)
         return 0.0
 
     def _mdf_tilt(self):
@@ -327,7 +356,7 @@ class OppModel:
         try:
             aw = self.archetype_weights()
             names = ("vpip", "pfr", "three_bet", "shove", "fold_to_steal", "fold_to_bet", "aggression", "discard_tau",
-                     "toss_lowest", "size_corr", "mdf_tilt")
+                     "toss_lowest", "size_corr", "mdf_tilt", "river_pit", "fold_to_bet_flop", "fold_to_bet_river")
             log(f"opp h={self._hands} " + " ".join(f"{a[:3]}={w:.2f}" for a, w in aw.items() if w > 0.005) + " | "
                 + " ".join(f"{s}={self.stat(s):.2f}" for s in names))
         except Exception:

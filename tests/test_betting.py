@@ -373,6 +373,84 @@ def test_river_bluff_rate_tracks_the_formula(monkeypatch):
     assert k == 0
 
 
+def _flop_folder_river_caller(n=80):
+    """The review's opponent: folds to our flop bet three hands in four, checks down to call our river bet in the
+    fourth. Aggregate fold-to-bet ~0.69, river fold-to-bet ~0.25."""
+    pre = [{"street": "preflop", "actor": "me", "action": "raise", "amount": 6},
+           {"street": "preflop", "actor": "opp", "action": "call", "amount": 6}]
+    folds = pre + [{"street": "flop", "actor": "opp", "action": "check"},
+                   {"street": "flop", "actor": "me", "action": "raise", "amount": 8},
+                   {"street": "flop", "actor": "opp", "action": "fold"}]
+    calls_ = pre + [{"street": st, "actor": a, "action": "check"} for st in ("flop", "turn") for a in ("opp", "me")]
+    calls_ += [{"street": "river", "actor": "opp", "action": "check"},
+               {"street": "river", "actor": "me", "action": "raise", "amount": 8},
+               {"street": "river", "actor": "opp", "action": "call", "amount": 8}]
+    o = OppModel()
+    for i in range(n):
+        h = calls_ if i % 4 == 3 else folds
+        o.observe_hand({"type": "hand_result", "result": "fold" if h is folds else "showdown", "history": h})
+    return o
+
+
+def test_river_bluffs_read_the_river_fold_to_bet(monkeypatch):
+    o = _flop_folder_river_caller()
+    assert o.stat("fold_to_bet") == pytest.approx(0.688, abs=0.002)
+    assert o.stat("fold_to_bet_river") == pytest.approx(0.249, abs=0.002)
+    fake_equity(monkeypatch, 0.05, 0.02)
+    hist = [{"street": st, "actor": a, "action": "check"} for st in ("flop", "turn") for a in ("opp", "me")]
+    hist.append({"street": "river", "actor": "opp", "action": "check"})
+    board = ["Ac", "Kd", "Qh", "Jc", "8s"]
+    r = req_("river", board, pot=12, history=hist)
+    h = hand_("3c 4d 9s", " ".join(board), seat="button", keep="3c 4d", opp_discard="2h")
+    assert B.bet_amount(spot(r), params.BET_F_STD) == 8                # 8 into 12: bar 0.4 < aggregate 0.688
+    rng = random.Random(7)
+    acts = [B.decide(r, h, o, Clock(), rng) for _ in range(300)]
+    assert all(a["action"] == "check" for a in acts)                   # river 0.249 < BET_BLUFF_MIN_FTB: never
+    # the per-street read falls back to the aggregate while the stats are untrusted
+    stub = Opp(hands=5, fold_to_bet=0.9, fold_to_bet_river=0.0)
+    assert B._Opp(stub).ftb_st["river"] == B._Opp(stub).ftb == params.OPP_FREQ["fold_to_bet"][0]
+    trusted = Opp(hands=50, fold_to_bet=0.9)                            # no street data: shrinks to the aggregate
+    assert B._Opp(trusted).ftb_st == {"flop": 0.9, "turn": 0.9, "river": 0.9}
+
+
+def test_pit_k_inverts_the_tilted_mean():
+    assert B.pit_k(0.5) == 0.0
+    for m in (0.3, 0.42, 0.55):
+        k = B.pit_k(m)
+        assert B._tilted_mean(k) == pytest.approx(m, abs=1e-6)
+    assert B.pit_k(0.3) < B.pit_k(0.42) < 0 < B.pit_k(0.55)
+    assert B.pit_k(0.01) == params.BET_PIT_K_LO and B.pit_k(0.99) == params.BET_PIT_K_HI
+    assert B.pit_k(float("nan")) == 0.0
+
+
+def test_river_calibration_weakens_their_betting_range_and_records_the_base():
+    hist = [{"street": st, "actor": a, "action": "check"} for st in ("flop", "turn") for a in ("me", "opp")]
+    hist.append({"street": "river", "actor": "me", "action": "check"})
+    hist.append({"street": "river", "actor": "opp", "action": "raise", "amount": 10})
+    board = ["2c", "7d", "9h", "Ks", "4s"]
+    r = req_("river", board, pot=22, opp_bet=10, history=hist)
+    eqs = []
+    for pit in (0.5, 0.3):
+        B._HC.clear()
+        B._HC["key"] = None
+        h = hand_(" ".join(["9c", "8d", "3c"]), " ".join(board), keep="9c 8d", opp_discard="2h")
+        o = B._Opp(Opp(hands=50, river_pit=pit))
+        e = B._turn_river_equity(r, h, o, "river", 1e9, 400, random.Random(1), B._now())[0]
+        eqs.append(e)
+        assert B._HC.get("pit_base") is not None
+        out = B.decide(r, h, Opp(hands=50, river_pit=pit), Clock(), random.Random(1))
+        if out["action"] == "call":
+            assert h.river_pit is not None
+    assert eqs[1] > eqs[0] + 0.03                    # their bets are weaker than modelled -> more equity for us
+    # not facing a river bet: no correction, nothing recorded
+    B._HC.clear()
+    B._HC["key"] = None
+    r2 = req_("river", board, pot=12, history=hist[:-1])
+    h2 = hand_("9c 8d 3c", " ".join(board), keep="9c 8d", opp_discard="2h")
+    B._range_for(r2, h2, B._Opp(Opp(hands=50, river_pit=0.3)), "river")
+    assert B._HC.get("pit_base") is None
+
+
 def test_bluff_exploit_test():
     # 2/3 pot: bar 0.4. Trusted fold-to-bet above the bar -> always; below the floor -> never
     assert B.bluff_prob(20, 30, 0.45, True) == 1.0
