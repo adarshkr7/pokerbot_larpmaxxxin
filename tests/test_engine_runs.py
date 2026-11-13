@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from engine_util import (BOT, CHAMPION, RANDOM_BOT, STARTER, TESTS, assert_clean, run_match)
+from engine_util import (CHAMPION, RANDOM_BOT, STARTER, TESTS, assert_clean, run_match)
 
 OPPONENTS = {"random": RANDOM_BOT, "starter": STARTER}
 
@@ -38,10 +38,16 @@ def test_state_invariants_on_real_engine_sequences(tmp_path, opp):
         assert m and int(m.group(1)) >= 400, text[:3000]
 
 
+V0_DISCARD_ENV = dict(os.environ, PATCH_MODE="v0_discard,v0_preflop,v0_postflop")
+
+
 def test_c1_head_to_head_vs_champion_is_exactly_zero(tmp_path):
-    """Identical deterministic strategies cancel exactly under duplicate deals."""
+    """Identical deterministic strategies cancel exactly under duplicate deals. Our discard (F05/W3), preflop
+    play (W4) and postflop betting (W5) are the intended differences from v0, so all three are swapped back to v0's
+    here (tests/patched_bot.py, modes v0_discard,v0_preflop,v0_postflop)."""
     def one(seed):
-        return seed, run_match(BOT, CHAMPION, seed=seed, log_dir=tmp_path / f"s{seed}", hands=400)
+        return seed, run_match(TESTS / "patched_bot.py", CHAMPION, seed=seed, log_dir=tmp_path / f"s{seed}",
+                               hands=400, env=V0_DISCARD_ENV)
     for seed, (out, res) in parallel(one, range(301, 311)):
         assert_clean(out, res)
         assert res["A"]["net"] == 0 and res["B"]["net"] == 0, (seed, out)
@@ -63,14 +69,17 @@ def deterministic_view(log_text):
 
 
 def test_c2_play_identical_to_v0_against_starter(tmp_path):
+    """Everything but the discard, preflop and postflop play (swapped back to v0's, as in C1) plays exactly like
+    v0."""
     def one(job):
         bot, seed = job
         d = tmp_path / f"{bot.parent.parent.name}_{bot.parent.name}_{seed}"
-        out, res = run_match(bot, STARTER, seed=seed, log_dir=d, hands=400)
+        env = V0_DISCARD_ENV if bot.name == "patched_bot.py" else None
+        out, res = run_match(bot, STARTER, seed=seed, log_dir=d, hands=400, env=env)
         assert_clean(out, res)
         return deterministic_view((d / "match.log").read_text(encoding="utf-8"))
     seeds = range(401, 406)
-    ours = parallel(one, [(BOT, s) for s in seeds])
+    ours = parallel(one, [(TESTS / "patched_bot.py", s) for s in seeds])
     v0 = parallel(one, [(CHAMPION, s) for s in seeds])
     for seed, a, b in zip(seeds, ours, v0):
         assert len(a) == 400 + 5, (seed, len(a))

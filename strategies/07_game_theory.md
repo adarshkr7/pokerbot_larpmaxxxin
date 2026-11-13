@@ -1,26 +1,44 @@
 # 07: Game-theoretic options
 
 ## G1. Light mixing (P2)
-Randomise between near-equal options (within ~2% EV) so bet-size-reading bots can't model us:
-sizes, bluff selection and near-tie discards. Cheap, and it doesn't hurt vs weak bots.
+Randomise between near-equal options (within ~2% EV) so bet-size-reading bots can't model us: sizes and bluff
+selection. Mixing in a lower-EV option gives up that EV difference every time, so it needs a compensating
+benefit: against opponents who don't model us, just take the best option.
+- **Discards:** when all-in, always the maximum-equity discard, no mixing (03/D5). While betting remains, mix
+  discards only under 03/D4's conditions (within ~1.2 points of equity, opponent shown to read discards).
 
-Status: todo.
+Status: partly done (borderline preflop hands and bluff selection are randomised; no size mixing; no discard mixing).
 
 ## G2. Minimum defence frequency (P1)
-Facing a bet b into pot P, defend (call or raise) at least `P / (P + b)` of our range when the opponent
-is capable of bluffing. That stops aggressive bots from profiting with any two cards. Implement it as a lower
-bound on our continue range in the call rule (05/B1) vs aggressive archetypes.
+Facing a bet b into pot P (**P = the pot before their bet**), a range that continues less often than
+`MDF = P / (P + b)` lets a zero-equity bluff of that size profit immediately.
+- In request terms, for an opening bet: `b = to_call` and `P = pot − to_call`, so `MDF = (pot − to_call) / pot`.
+  (Using the request's `pot` as P makes the bet look smaller than it is.)
+- **MDF is a diagnostic, never an override of 05/B1.** It says nothing about one hand: on the river or facing
+  an all-in, fold whenever the call is −EV against their betting range (shove 150 into 100: a hand with 20%
+  equity loses 70 chips by calling, whatever its percentile). On earlier streets the decision is continuation
+  EV (B1 with `R_pos`).
+- **How we use it:** track how often we fold to opening bets, per street. If our fold rate vs an *aggressive*
+  archetype (06/M2) runs clearly above `1 − MDF` over ≥ 20 such bets, the likeliest cause is that our estimate
+  of their betting range is too strong: widen that range (lower the B7 shift for this opponent), which makes B1
+  call more. Do not force individual calls.
+- A percentile against uniformly random hands is only a strength heuristic. It does **not** measure our share
+  of our own arrival range (which is conditioned on our earlier actions and discard), so it must not be used
+  to "enforce" MDF.
 
-Status: todo.
+Status: done as the diagnostic (`mdf_tilt` in `bot/opponent.py`, read by `bot/betting.py`).
 
 ## G3. Preflop-only CFR (P3)
-1755 canonical hands × a short action tree (fold / call / raise 3× / shove, ≤ 3 raises) with
-equity-based terminal values (all-in equity from the E4 table). Small enough to solve offline in
-Python in minutes to hours. It gives balanced open/3-bet/call ranges.
+1755 canonical hands × a short action tree (fold / call / raise 3× / shove, ≤ 3 raises). Terminal values must
+come from **matchups**: sample two disjoint physical triples, play out board and discards under a stated
+policy, and give both players chip utilities from that one outcome and their actual commitments. The E4 table
+(equity vs a *fixed* range) is not enough: two premium hands would both get > 50% and the game would stop
+being zero-sum. Non-all-in leaves also need a stated continuation value (e.g. realised equity × pot).
+Solvable offline in Python in minutes to hours; it would give balanced open/3-bet/call ranges.
 - Value: moderate. The heuristic tiers from 04/P2 tuned in the arena may get most of it.
 - Do only if v2 is done by Sat.
 
-Status: todo.
+Status: not built (no time).
 
 ## G4. Full MCCFR blueprint (P3, probably rejected)
 MIT 2026 Camello's *final* bot was CFR with card buckets (strength × texture × discard value)
@@ -37,8 +55,9 @@ Gemini's sizing analysis:
   (up to 2,652 public discard pairs), so a full-game CFR needs very lossy buckets.
 - **Storage is not the obstacle.** A 300k-information-set strategy as uint8 (3 stored probabilities, the 4th
   implied) is ~900 KB raw, ~400–550 KB compressed.
-- **Recommendation:** if any CFR, **preflop + flop only** (~25k information sets with 1,755 hand classes ×
-  ~50–120 flop texture buckets); turn and river via range equity.
+- **Recommendation:** if any CFR, **preflop + flop only**; turn and river via range equity. Gemini's "~25k
+  information sets" does not follow from its own abstraction: 1,755 hand classes × 50–120 flop texture buckets
+  is 88k–211k combinations before betting histories and seats. Count reachable information sets explicitly.
 
 GPT-astra (agrees CFR is optional):
 - If we try a blueprint, start with **16 / 32 / 32 / 64** buckets (preflop / flop / turn / river) and actions

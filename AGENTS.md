@@ -21,9 +21,9 @@ Hold'em where each player gets **3 hole cards** and, after flop betting, both pl
 | `bot/` | Our submission. `bot/bot.py` is the entry point. | Yes |
 | `champion/` | The current BEST bot (`champion/bot/`), its scores (`BEST.json`), promotion history and the gauntlet config. **Changed only by `scripts/promote.py`** | No (only via promote) |
 | `scripts/promote.py` | Promotion gate: gauntlet + head-to-head vs champion; on success swaps the champion and rebuilds `dist/submission.zip` | Yes |
-| `agents/` | Agentic loop (Claude Code + Codex): roles, worktrees, module interfaces, workstream briefs, review/coordinator prompts | Yes (interfaces via coordinator) |
-| `DEVELOPMENT.md` | The development flow: workstreams, agent protocol, promotion gate, plan review loop, daily sequence | Yes |
-| `strategies/` | Strategy catalogue: one file per area, with priorities (P0–P3), specs and status. The source of truth for strategy decisions; update the `Status:` lines as ideas are built | Yes |
+| `agents/` | Module interfaces (`INTERFACES.md`, the contract every implementation must match) and the earlier per-feature plans and reviews (design references only; see "Development flow") | Yes (interfaces via the orchestrator) |
+| `DEVELOPMENT.md` | Workstreams, promotion gate, daily sequence. Its plan review loop is superseded by "Development flow" below | Yes |
+| `strategies/` | Strategy catalogue: one file per area, with priorities (P0–P3), specs and status. **The spec that gets reviewed and implemented**; update the `Status:` lines as ideas are built | Yes |
 | `scripts/build.py` | Validates `bot/` (imports, stray stdout prints) and builds `dist/submission.zip` | Yes |
 | `tests/` | pytest: protocol tests (bot as subprocess) + a seeded engine match | Yes |
 | `requirements*.txt`, `pyproject.toml` | Pinned deps (runtime: numpy, scipy; dev: pytest) and pytest config | Yes |
@@ -142,21 +142,39 @@ Engine flags: `--stage 1|2`, `--hands N` (even), `--seed S`, `--verbose`, `--log
 5. If the change is meant to improve strength, show results over many seeds against the
    previous version, not a single match.
 
-## Development flow (read DEVELOPMENT.md)
+## Development flow
 
-Every agent follows this protocol for every task:
-1. **Restate the brief:** workstream, files you may touch, `strategies/` item IDs, measurable goal.
-2. **Solve**, using parallel subagents for independent sub-parts.
+Every implementing agent follows this protocol for every task:
+1. **Restate the brief:** files you may touch, `strategies/` item IDs, measurable goal.
+2. **Solve** it yourself; implementing subagents do not spawn further subagents.
 3. **Check two ways** (e.g. evaluator vs engine `best_hand` + edge cases; Monte Carlo vs exact enumeration).
 4. **Measure:** `pytest`, `scripts/build.py --check`, `scripts/arena.py`, `scripts/promote.py --dry-run`.
 5. **Raise BEST only by winning:** `scripts/promote.py --note "..."`. Never edit `champion/` or
    `dist/submission.zip` by hand. Only the champion's zip is ever uploaded.
 6. **Record:** update `Status:` lines in `strategies/`; commit on your workstream branch.
 
-**Every feature follows the plan → review → implement loop** (`agents/README.md`):
-Claude writes the plan in `agents/plans/Fnn_*.md`; Codex reviews it with `agents/prompts/plan_review.md` and returns a
-bug list; Claude answers each bug (*fixed* / *rejected because …*) in the plan's review log and resubmits; repeat
-until Codex reports **no bugs**; only then Claude implements it. **No code for a feature before its plan is approved.**
+**Every strategy area follows the fix → review → fix → implement loop** (since Fri 13 Nov; it replaces the
+per-feature plan loop in `agents/README.md`, which was too slow for the time left). The strategy file
+`strategies/NN_*.md` is the spec; there is no separate plan document.
+
+1. **Orchestrator (Claude Code, main session)** reads the strategy file and fixes its bugs: wrong rule facts
+   (checked against `starter_kit/engine.py`), wrong arithmetic, contradictions with other strategy files, with
+   `agents/INTERFACES.md` or with the code already in `bot/`. Numeric claims are recomputed or simulated.
+2. **Codex reviews the fixed file once**: `codex exec`, model `gpt-6.1-sol`, reasoning effort `high`, read-only
+   sandbox, one strategy file per call, reply = a numbered bug list ending in a `VERDICT:` line. (`gpt-6-astra`
+   is no longer used: it burns the usage limit.) If Codex is rate-limited, wait for the reset; do not skip the
+   review.
+3. **Orchestrator fixes** every reported bug in the strategy file, or rejects it with a reason that can be
+   checked (a rule, an engine line, a measurement). One review round, not a loop until clean.
+4. **An Opus 5.5 subagent (effort `high`) implements** that strategy area in `bot/` from the corrected file,
+   one area at a time in dependency order: 02 → 03 → 04 → 05 → 06 → 07 → 08. Subagents work in the main
+   checkout, never in parallel on `bot/`, leave their work uncommitted, and report signatures, test results,
+   measured speeds and every deviation from the spec.
+5. **Orchestrator verifies** the report against the definition of done above before starting the next area.
+
+**No code for a strategy area before step 3 is finished for it.** Files 00 and 09 are reference only (nothing
+to implement). The earlier feature plans in `agents/plans/` stay as design references (F02 for the evaluator
+and equity, F03 for the sparring bots); where a plan and its strategy file disagree, the strategy file wins.
 Real promotions happen only from committed code on `main` (`promote.py` refuses otherwise).
 Commits carry no AI co-author or attribution trailers.
 

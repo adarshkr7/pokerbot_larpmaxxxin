@@ -16,7 +16,7 @@ Add our own archetype bots (cheap, ~30 lines each, written by us):
     robustness);
   - `min_click.py`: always min-raises up to the cap (tests off-tree sizes and cap handling).
 
-Status: todo (archetype bots); rivals ready.
+Status: partly done: `tests/shove_bot.py`, `station_bot.py`, `nit_bot.py`, `maniac_bot.py` exist and are used in the arena; they are **not yet in `champion/gauntlet.json`** (the promotion gauntlet is still random + starter). The other bots in this list are not written. Rivals ready.
 
 ## T2. Arena protocol (P0)
 `scripts/arena.py`: N seeds × opponents, W-D-L and chips/hand ± SE.
@@ -25,9 +25,13 @@ Status: todo (archetype bots); rivals ready.
 - Timing check: `--jobs 1 --stage 2` (parallel runs distort timing).
 
 ## T3. Comparing versions (P0)
-Freeze every uploaded or promising version as `versions/vN/bot.py` (our own code, allowed to commit).
-Then run `arena.py --rivals versions/vN/bot.py` to play head-to-head.
-- **Duplicate deals mean low variance.** A difference of ≥ 2 SE over ≥ 20 seeds is real.
+The frozen reference is the **champion** (`champion/bot/`, changed only by `scripts/promote.py`; the earlier
+`versions/vN/` idea was replaced by it). `scripts/promote.py --dry-run` plays the gauntlet plus a head-to-head
+vs the champion; a real promotion needs committed code on `main`.
+- **Duplicate deals mean low variance,** but "≥ 2 SE over 20 seeds" is not proof (two-sided p ≈ 0.06 at n = 20,
+  and repeated parameter picking inflates false positives). Screening runs are exploratory. To call a change an
+  improvement, take a 95% confidence interval of the paired whole-match differences on **held-out seeds** and
+  require its lower bound to be above zero.
 - Accept a change only if it doesn't lose to the previous version and doesn't regress against any ladder bot.
 
 **Paired-difference testing (Gemini):** run the candidate and the baseline against the same opponent on the
@@ -37,9 +41,14 @@ difference is far lower than comparing two independent arena runs. Gemini's samp
 are enough.
 
 **Statistics (GPT-astra):**
-- Duplicate unit `Y_i = (x_leg1 + x_leg2)/2`; CI = Ȳ ± 1.96·s/√n. Pairs needed for 80% power: n ≈ 7.84·σ²/δ².
-- **Our bot adapts within a leg**, so hands aren't independent. Treat **whole matches** as units and bootstrap
-  them.
+- **Our bot adapts within a leg**, so hands (and deal pairs) inside a match aren't independent. The unit is the
+  **whole match**: for seed s, `D_s` = candidate chips/hand − baseline chips/hand against the same opponent.
+  Bootstrap the `D_s`. Matches needed for ~80% power at two-sided α = 0.05: `n ≈ 7.85·σ_D²/δ²`, with `σ_D`
+  measured across matches.
+- **Keep both versions' logs.** `scripts/arena.py` names the log directory by opponent and seed only, and the
+  engine opens `match.log` for writing, so a second run on the same seeds overwrites the first. Copy
+  `logs/arena/` to a per-version directory before running the other version, then pair records by opponent,
+  seed, leg and hand id.
 - Match-win rate near 50%: ~384 matches for ±5 points.
 - Protocol: **20 matches smoke → 100 screening → 400+ finalists**, same seeds for both versions, and a
   **held-out seed range** for the final pick.
@@ -61,6 +70,7 @@ Overnight runs are fine because the arena is cheap.
 
 ## T5. Log review (P1)
 `logs/arena/<opp>/seed*/match.log` has one line per hand. Grep for our biggest losses and replay
-the reasoning (add a `DEBUG` env var that dumps our equity estimates to stderr).
+the reasoning (`POKERBOT_DEBUG=1` makes `bot/log.py` dump our equity estimates to stderr; it is off by
+default and capped at 48 KB).
 
 Status: todo.

@@ -6,8 +6,11 @@ Not strategies to code, but facts that should drive every design decision.
 Each deal is played twice with hole cards and seats swapped (Rulebook 7.1). Over a match, the
 chip difference comes almost entirely from **decision differences on identical cards**.
 - A small but *consistent* edge (e.g. better discards on every contested flop) turns into match wins
-  very reliably.
-- High-variance "gambling" strategies gain nothing from luck, because the opponent gets the same cards.
+  far more reliably than in a single-deal format.
+- Duplication **reduces** card luck; it does not remove it. When the two bots play a deal differently the
+  stakes differ (one shoves and is called for ±200 while its twin folds for −2), and the engine simply sums
+  both legs, so residual variance remains. High-variance lines still carry luck; they just gain no *expected*
+  benefit from it.
 
 ## F2. Match points first, chips second
 Win 1 / draw 0.5 / loss 0, ranked by points. Ties are broken by **capped** chips per hand (each match's net is clipped to
@@ -18,12 +21,18 @@ Win 1 / draw 0.5 / loss 0, ranked by points. Ties are broken by **capped** chips
 
 ## F3. A forfeit is the worst possible outcome
 A crash, timeout, 5 s reply or wall-clock kill loses the match with Δ = −C, the maximum loss, and the
-opponent gets +C. No strategy edge is worth any forfeit risk. See [01_robustness.md](01_robustness.md).
+opponent gets +C (C = 400 in Stage 1, 1000 in Stage 2). The only double-forfeit draw (Δ = 0) is when both bots fail during
+the same simultaneous discard exchange; a failure on an action request forfeits the bot that was asked. No strategy edge is worth any forfeit risk. See [01_robustness.md](01_robustness.md).
 
 ## F4. Stacks reset every hand at 100 BB
-No bankroll or tournament dynamics. Every hand is an independent 200-chip game. With the 4-raise
-cap per street, many big pots reach all-in by the turn, so **equity realisation is high** and
-equity-based play is closer to correct than in deep-stack poker.
+No bankroll or tournament dynamics. Every hand is an independent 200-chip game (blinds 1/2). The cap is
+**4 bets or raises per street, and the big blind counts as the first one preflop** (so 3 voluntary raises
+preflop, 4 on later streets). Stacks are only 100 BB and each street can be raised four times, so big pots
+often get all-in early; then **equity realisation is high** and equity-based play is closer to correct than
+in deep-stack poker.
+
+Seats (engine `betting_round`): the **button posts the small blind and acts first preflop; the big blind acts
+first on the flop, turn and river**. So the button is in position on every postflop street.
 
 ## F5. No memory across legs
 Each leg is a fresh process, so the opponent model starts from zero every leg (200 or 500 hands). Our

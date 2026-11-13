@@ -1,9 +1,33 @@
 """Dispatch: owns the leg/hand state, the clock and the opponent model; calls the policies."""
+import random
+
+import betting as betting_mod
+import discard as discard_mod
+import evaluator
+import legal
+import params
 import placeholder
-from log import log, warn
+import preflop as preflop_mod
+from cards import fmt
+from log import log, log_exc, warn
 from opponent import OppModel
 from state import HandState, LegState
 from timing import Clock
+
+_warmed = False
+
+
+def _warm_once():
+    """Fill the evaluator's memo tables once per process, during the uncharged start-up (Brain() is built
+    before the first message is read)."""
+    global _warmed
+    if _warmed:
+        return
+    _warmed = True
+    try:
+        evaluator.warm()
+    except Exception:
+        log_exc("evaluator.warm")
 
 
 class Brain:
@@ -12,6 +36,8 @@ class Brain:
         self.hand = None
         self.opp = OppModel()
         self.clock = Clock(self.leg)
+        self.rng = random.Random()
+        _warm_once()
 
     # ----------------------------------------------------------------- events
     def on_init(self, msg):
@@ -25,7 +51,11 @@ class Brain:
 
     def on_hand_result(self, msg):
         self.leg.record(msg)
-        self.opp.observe_showdown(msg)
+        try:                                     # a modelling bug must never affect play: swallow and log
+            seat = self.hand.seat if self.hand is not None else None
+            self.opp.observe_hand(msg, seat)
+        except Exception:
+            log_exc("opponent model")
         self.hand = None
 
     def on_notice(self, msg):
@@ -38,14 +68,44 @@ class Brain:
     # --------------------------------------------------------------- requests
     def act(self, req):
         self.clock.start(req)
-        self._ensure_hand(req).update_from_request(req)
-        return placeholder.v0_action(req)
+        hand = self._ensure_hand(req)
+        hand.update_from_request(req)
+        if req.get("street") == "preflop":
+            try:
+                intent = preflop_mod.decide(req, hand, self.opp, rng=self.rng)
+                if isinstance(intent, dict):
+                    return intent
+            except Exception:
+                log_exc("preflop")
+        elif req.get("street") in ("flop", "turn", "river"):
+            try:
+                intent = betting_mod.decide(req, hand, self.opp, self.clock, self.rng)
+                if isinstance(intent, dict):
+                    return intent
+            except Exception:
+                log_exc("betting")
+        return placeholder.v0_action(req)        # the fallback for every street
 
     def discard(self, req):
         self.clock.start(req)
         hand = self._ensure_hand(req)
         hand.update_from_discard_request(req)
-        return {"type": "discard", "card": placeholder.v0_discard(hand.hole_strs)}
+        try:
+            if len(hand.hole3) == 3 and len(hand.hole_strs) == 3 and len(hand.board) == 3:
+                betting = hand.my_stack > 0 and hand.opp_stack > 0
+                budget = self.clock.budget_ms("discard")
+                if not betting and budget > 0:     # D5: no later decisions in this hand
+                    cap = min(params.MAX_DECISION_MS, params.MAX_DECISION_FRAC * self.leg.per_response_ms)
+                    budget = min(budget * params.DISCARD_ALLIN_BUDGET_MULT, max(cap, budget))
+                card = discard_mod.choose_discard(hand.hole3, hand.board, self.opp, hand.dead, budget, self.rng,
+                                                  betting_possible=betting)
+                return {"type": "discard", "card": fmt(card)}
+        except Exception:
+            log_exc("discard")
+        try:
+            return {"type": "discard", "card": placeholder.v0_discard(hand.hole_strs)}
+        except Exception:
+            return {"type": "discard", "card": legal.fallback_discard(hand.hole_strs)}
 
     # ---------------------------------------------------------------- helpers
     def _ensure_hand(self, msg):

@@ -54,18 +54,19 @@ Several of its precise figures (LP timings, evals/s, σ, bb/100 impacts) are unv
 5. **Conservative, regularised opponent stats** plus simple exploits (stations, over-folders, shovers).
 6. **CFR / river solver optional,** only after the above is measured and stable.
 
-**Open disagreements to settle in the arena:** the shove-calling gate (49.5% EV-max vs ~56.5%); the time target
-(our 60–70% of bank vs GPT-astra's ~70%); the stats prior strength (12 vs 20).
+**Open disagreements to settle in the arena:** the shove-calling gate (pot-odds EV-max, 49.5%, vs ~56.5%); the
+stats prior strength (12 vs 20). **Settled:** the time target is ≤ 40% of the bank measured locally (02/E5).
 
-## Build timeline (proposal)
+## Build timeline (revised Fri 13 Nov: only F01, the skeleton, is built)
 
 | Day | Goal | Strategy items |
 |---|---|---|
-| **Wed 11** | v0 baseline, **upload it** | 01 all, 02 evaluator + MC, 03 D1, 04 P1 (simple tiers), 05 B1–B3 |
-| **Thu 12** | v1 tables + sizing | 02 preflop table, 04 full, 05 B4–B6, 08 arena runs |
-| **Fri 13** | v1.5 ranges | 03 D2–D3 (range-aware discard + reading theirs), 05 B7 (range equity) |
-| **Sat 14** | v2 exploitation | 06 stats + archetypes; tuning sweeps; Stage 2 timing; **upload** |
-| **Sun 15** | Freeze | Robustness fuzzing only, final upload by evening (not 23:59) |
+| **Fri 13** | Engine + first real bot | 02 E1, E3 (evaluator, equity), 03 D1 + D5 (discard), 04 P1 + P3 (tiers, sizing), 05 B1–B4 |
+| **Sat 14** | Ranges + exploitation, **upload** | 03 D3 (read their discard), 05 B5–B7, 06 M1–M2 + M4, 07 G2, 08 T1 sparring bots; Stage 2 timing |
+| **Sun 15** | Tune, then freeze | Parameter sweeps (08/T4), soak runs; final upload by evening (not 23:59) |
+
+Dropped for lack of time unless everything above is stable: 02 E2 (numpy evaluator), 02 E4 / 04 P2 (1,755-hand
+table; P1 tiers stand in), 03 D4, 05 B8–B9, 06 M3, 07 G3–G5.
 
 ## Status tracking
 

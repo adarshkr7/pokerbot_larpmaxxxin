@@ -34,3 +34,35 @@ def parse_valid(cards):
             if c not in out:
                 out.append(c)
     return out
+
+
+# --- F02 additions: pairs, dead masks, decks ---------------------------------------------------
+
+def pair_index(a, b):
+    """Index of the unordered pair {a, b} (a != b) in 0..1325: hi*(hi-1)//2 + lo. Inverse: PAIRS."""
+    if a < b:
+        return b * (b - 1) // 2 + a
+    return a * (a - 1) // 2 + b
+
+
+PAIRS = [(lo, hi) for hi in range(52) for lo in range(hi)]   # PAIRS[pair_index(a, b)] == (min, max)
+
+
+def dead_mask(cards):
+    """bytearray(52) with the given card ids set; anything that is not an int in 0..51 is ignored."""
+    m = bytearray(52)
+    for c in cards:
+        if isinstance(c, bool):
+            continue
+        try:
+            i = c.__index__()
+        except Exception:
+            continue
+        if 0 <= i < 52:
+            m[i] = 1
+    return m
+
+
+def deck_without(dead):
+    """Card ids not flagged in `dead` (any length-52 sequence of flags, e.g. HandState.dead)."""
+    return [c for c in range(52) if not dead[c]]
