@@ -27,7 +27,8 @@ BUILTIN = {"random": ROOT / "starter_kit" / "example_bots" / "random_bot.py",
            "starter": ROOT / "starter_kit" / "bot.py",
            "champion": ROOT / "champion" / "bot" / "bot.py"}
 DEFAULT_OPPS = ["random", "starter", "champion", "tests/shove_bot.py", "tests/station_bot.py",
-                "tests/nit_bot.py", "tests/maniac_bot.py"]
+                "tests/nit_bot.py", "tests/maniac_bot.py", "tests/potodds_bot.py", "tests/tag_bot.py",
+                "tests/minraise_bot.py", "tests/checkraise_bot.py", "tests/sizetell_bot.py", "tests/overbet_bot.py"]
 BOT_PY = ROOT / ".venv" / "Scripts" / "python.exe"      # the venv with numpy/scipy
 if not BOT_PY.exists():
     BOT_PY = ROOT / ".venv" / "bin" / "python"

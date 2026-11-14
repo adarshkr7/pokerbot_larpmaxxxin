@@ -27,7 +27,7 @@ Hold'em where each player gets **3 hole cards** and, after flop betting, both pl
 | `scripts/build.py` | Validates `bot/` (imports, stray stdout prints) and builds `dist/submission.zip` | Yes |
 | `tests/` | pytest: protocol tests (bot as subprocess) + a seeded engine match | Yes |
 | `requirements*.txt`, `pyproject.toml` | Pinned deps (runtime: numpy, scipy; dev: pytest) and pytest config | Yes |
-| `tests/*_bot.py` | Our own sparring bots (`shove_bot`, `station_bot`, `nit_bot`, `maniac_bot`), stdlib only, used by `scripts/arena.py` | Yes |
+| `tests/*_bot.py` | Our own sparring bots (`shove_bot`, `station_bot`, `nit_bot`, `maniac_bot`, `potodds_bot`, `tag_bot`, `minraise_bot`, `checkraise_bot`, `sizetell_bot`, `overbet_bot`; the last five share `tests/_sparring.py`), stdlib only, used by `scripts/arena.py` | Yes |
 | `starter_kit/` | Organiser-supplied `engine.py`, reference `bot.py`, `example_bots/random_bot.py` | **No.** Treat as read-only vendor code |
 | `docs/` | Official PDFs | No |
 | `logs/` | Engine output (gitignored) | Generated |
@@ -182,7 +182,8 @@ Commits carry no AI co-author or attribution trailers.
 
 - We test only against bots we may rely on: `random` and `starter` (organiser kit), `champion` (the frozen
   champion) and **our own sparring bots** in `tests/` (`shove_bot.py`, `station_bot.py`, `nit_bot.py`,
-  `maniac_bot.py`; add more there, stdlib only). `scripts/arena.py` runs them (many seeds, W-D-L,
+  `maniac_bot.py`, `potodds_bot.py`, and the style bots `tag_bot.py`, `minraise_bot.py`, `checkraise_bot.py`,
+  `sizetell_bot.py`, `overbet_bot.py`; add more there, stdlib only). `scripts/arena.py` runs them (many seeds, W-D-L,
   chips/hand ± SE); with no `--opps` it uses that whole pool.
 - **The MIT Pokerbots 2026 bots were removed from the repo on Fri 13 Nov** (the `rivals/` directory, its adapter
   and its separate virtualenv). They were written for a different game and only played ours through an adapter,
