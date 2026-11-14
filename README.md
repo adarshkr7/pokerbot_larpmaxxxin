@@ -1,4 +1,4 @@
-# Pokerbots IIITB — Discard Hold'em bot
+# Pokerbots — Discard Hold'em bot
 
 Submission deadline: **15 November 2026, 23:59 IST** (upload on Unstop).
 
