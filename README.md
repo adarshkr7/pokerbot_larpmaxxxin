@@ -1,10 +1,26 @@
 # Pokerbots — Discard Hold'em bot
 
-Submission deadline: **15 November 2026, 23:59 IST** (upload on Unstop).
+Submission deadline: **15 November 2026, 23:59 IST**.
+
+## Submission
+
+**The submitted bot is `champion/bot/`** (its `bot.py` is the entry point, at the top level of that folder).
+The submitted file is `submission.zip`: exactly the contents of `champion/bot/`, with `bot.py` at the zip's top
+level. `scripts/promote.py` rebuilds it on every promotion; to rebuild it by hand:
+
+    python scripts/build.py --src champion/bot          # -> dist/submission.zip
+
+Run the submitted bot with the organiser engine:
+
+    python3.11 starter_kit/engine.py champion/bot/bot.py starter_kit/example_bots/random_bot.py
+
+`bot/` is our development copy; it becomes the champion only through `scripts/promote.py` (see `AGENTS.md`).
+`champion/BEST.json` and `champion/history.jsonl` record which commit each champion version came from.
 
 | Path | What |
 |---|---|
-| `bot/bot.py` | Our submission (currently the starter strategy) |
+| `champion/bot/` | **The submitted bot** (entry point `champion/bot/bot.py`) |
+| `bot/` | Development copy of the bot (promoted to `champion/` when it beats the champion) |
 | `starter_kit/` | Organiser-supplied engine, starter bot, random bot (do not edit) |
 | `docs/` | Rulebook, Problem Statement, Protocol Specification |
 
