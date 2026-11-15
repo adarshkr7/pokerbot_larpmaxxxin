@@ -14,7 +14,7 @@ Run the submitted bot with the organiser engine:
 
     python3.11 starter_kit/engine.py champion/bot/bot.py starter_kit/example_bots/random_bot.py
 
-`bot/` is our development copy; it becomes the champion only through `scripts/promote.py` (see `AGENTS.md`).
+`bot/` is our development copy; it becomes the champion only through `scripts/promote.py`.
 `champion/BEST.json` and `champion/history.jsonl` record which commit each champion version came from.
 
 | Path | What |
@@ -31,8 +31,6 @@ Run the submitted bot with the organiser engine:
     .venv/Scripts/python.exe -m pytest
     .venv/Scripts/python.exe scripts/build.py     # validate + build dist/submission.zip
 
-See `AGENTS.md` for the full working rules.
-
 ## Run a local match
 
     python3.11 starter_kit/engine.py bot/bot.py starter_kit/example_bots/random_bot.py
@@ -48,10 +46,6 @@ Logs go to `logs/` (gitignored). Debug output must go to stderr, never stdout.
 
 ## How we work
 
-- [DEVELOPMENT.md](DEVELOPMENT.md): the development flow, promotion
-  gate, daily sequence Wed 11 → Sun 15 Nov.
-- [agents/](agents/): the agentic loop with **Claude Code + Codex**: roles, worktrees, module interfaces,
-  workstream briefs W1–W7, review and coordinator prompts.
 - [strategies/](strategies/): the strategy catalogue (P0–P3) plus the Gemini and GPT-astra research digests.
 - [champion/](champion/): the current best bot (`BEST.json`), changed only by `scripts/promote.py`.
   `dist/submission.zip` is always built from it. **Upload only that.**

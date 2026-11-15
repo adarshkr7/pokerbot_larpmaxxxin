@@ -29,3 +29,12 @@ champion/.lock
 champion/bot.tmp/
 champion/bot.old/
 champion/BEST.json.tmp
+
+# Agentic development loop (Claude Code / Codex setup): kept locally, not published
+AGENTS.md
+CLAUDE.md
+DEVELOPMENT.md
+agents/
+scripts/review.py
+.claude/
+.codex/
